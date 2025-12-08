@@ -9,13 +9,6 @@ void copy_RGB(RGB *src, RGB *dest){
 	dest->b = src->b;
 }
 
-Image* pad_image(const Image img, const int padding){
-	/**
-	*	TO BE IMPLEMENTED
-	*/
-	return NULL;
-}
-
 int* generate_kernel(const operation_t operation, int *size){
 	/**
 	*	TO BE IMPLEMENTED
