@@ -1,6 +1,6 @@
-#ifndef BMP_HEADER
+#ifndef BMP_COMMON
 
-#define BMP_HEADER
+#define BMP_COMMON
 
 typedef struct
 {
@@ -14,10 +14,7 @@ typedef struct
     RGB *data;
 } Image; // a BMP image as an array of RGB points
 
-/* Read BMP file, build and return Image struct */
-Image *readBMP(const char *filename);
-
-/* Save Image in file in BMP format */
+void copy_RGB(const RGB *src, RGB *dest);
 int saveBMP(const char *filename, const Image *img);
 
 #endif

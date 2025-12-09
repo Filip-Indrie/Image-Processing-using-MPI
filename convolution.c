@@ -1,13 +1,8 @@
-#include "convolution.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-void copy_RGB(const RGB *src, RGB *dest){
-	dest->r = src->r;
-	dest->g = src->g;
-	dest->b = src->b;
-}
+#include <omp.h>
+#include "convolution.h"
 
 int min(int a, int b){
 	return (a < b) ? a : b;
@@ -15,6 +10,17 @@ int min(int a, int b){
 
 int max(int a, int b){
 	return (a > b) ? a : b;
+}
+
+operation_t string_to_operation(char *string){
+	if(stricmp(string, "RIDGE") == 0) return RIDGE;
+	else if (stricmp(string, "EDGE") == 0) return EDGE;
+	else if (stricmp(string, "SHARPEN") == 0) return SHARPEN;
+	else if (stricmp(string, "BOXBLUR") == 0) return BOXBLUR;
+	else if (stricmp(string, "GAUSSBLUR3") == 0) return GAUSSBLUR3;
+	else if (stricmp(string, "GAUSSBLUR5") == 0) return GAUSSBLUR5;
+	else if (stricmp(string, "UNSHARP5") == 0) return UNSHARP5;
+	else return -1;
 }
 
 double* generate_kernel(const operation_t operation, int *size){
@@ -25,7 +31,7 @@ double* generate_kernel(const operation_t operation, int *size){
 			double *kernel = (double*)malloc(3 * 3 * sizeof(double));
 			if(kernel == NULL){
 				fprintf(stderr, "Error in generate_kernel while allocating memory\n");
-				exit(-1);
+				return NULL;
 			}
 			
 			kernel[0] = 0;
@@ -45,7 +51,7 @@ double* generate_kernel(const operation_t operation, int *size){
 			double *kernel = (double*)malloc(3 * 3 * sizeof(double));
 			if(kernel == NULL){
 				fprintf(stderr, "Error in generate_kernel while allocating memory\n");
-				exit(-1);
+				return NULL;
 			}
 			
 			kernel[0] = -1;
@@ -65,7 +71,7 @@ double* generate_kernel(const operation_t operation, int *size){
 			double *kernel = (double*)malloc(3 * 3 * sizeof(double));
 			if(kernel == NULL){
 				fprintf(stderr, "Error in generate_kernel while allocating memory\n");
-				exit(-1);
+				return NULL;
 			}
 			
 			kernel[0] = 0;
@@ -85,7 +91,7 @@ double* generate_kernel(const operation_t operation, int *size){
 			double *kernel = (double*)malloc(3 * 3 * sizeof(double));
 			if(kernel == NULL){
 				fprintf(stderr, "Error in generate_kernel while allocating memory\n");
-				exit(-1);
+				return NULL;
 			}
 			
 			kernel[0] = (double)1/9;
@@ -105,7 +111,7 @@ double* generate_kernel(const operation_t operation, int *size){
 			double *kernel = (double*)malloc(3 * 3 * sizeof(double));
 			if(kernel == NULL){
 				fprintf(stderr, "Error in generate_kernel while allocating memory\n");
-				exit(-1);
+				return NULL;
 			}
 			
 			kernel[0] = (double)1/16;
@@ -125,7 +131,7 @@ double* generate_kernel(const operation_t operation, int *size){
 			double *kernel = (double*)malloc(5 * 5 * sizeof(double));
 			if(kernel == NULL){
 				fprintf(stderr, "Error in generate_kernel while allocating memory\n");
-				exit(-1);
+				return NULL;
 			}
 			
 			kernel[0] = (double)1/256;
@@ -161,7 +167,7 @@ double* generate_kernel(const operation_t operation, int *size){
 			double *kernel = (double*)malloc(5 * 5 * sizeof(double));
 			if(kernel == NULL){
 				fprintf(stderr, "Error in generate_kernel while allocating memory\n");
-				exit(-1);
+				return NULL;
 			}
 			
 			kernel[0] = (double)-1/256;
@@ -192,8 +198,8 @@ double* generate_kernel(const operation_t operation, int *size){
 			return kernel;
 		}
 		default:{
-			printf("Invalid operation\n");
-			exit(-1);
+			fprintf(stderr,"Invalid operation\n");
+			return NULL;
 		}
 	}
 }
@@ -202,13 +208,13 @@ Image* perform_convolution_serial(const Image *img, const operation_t operation)
 	Image *new_img = (Image*)malloc(sizeof(Image));
 	if(new_img == NULL){
 		fprintf(stderr, "Error in perform_convolution_serial while allocating memory\n");
-		exit(-1);
+		return NULL;
 	}
 	
 	RGB *new_data = (RGB*)malloc(img->height * img->width * sizeof(RGB));
 	if(new_data == NULL){
 		fprintf(stderr, "Error in perform_convolution_serial while allocating memory\n");
-		exit(-1);
+		return NULL;
 	}
 	
 	RGB *old_data = img->data;
@@ -216,6 +222,7 @@ Image* perform_convolution_serial(const Image *img, const operation_t operation)
 	int width = img->width;
 	int kernel_size;
 	double *kernel = generate_kernel(operation, &kernel_size);
+	if(kernel == NULL) return NULL; // error message was printed by the called function
 	
 	for(int i = 0; i < img->height; ++i){
 		for(int j = 0; j < img->width; ++j){
@@ -258,16 +265,9 @@ Image* perform_convolution_serial(const Image *img, const operation_t operation)
 	return new_img;
 }
 
-/**
-================================================================================================
-	TESTBENCH
-
-int main(){
-	Image *img = readBMP("Photos\\XL.bmp");
-	Image *editted_img = perform_convolution_serial(img, UNSHARP5);
-	saveBMP("Photos\\Editted_XL.bmp", editted_img);
-	free(img->data);
-	free(img);
-	return 0;
+Image* perform_convolution_parallel(const Image *img, const operation_t operation){
+	/**
+	*	TO BE IMPLEMENTED
+	*/
+	return NULL;
 }
-*/

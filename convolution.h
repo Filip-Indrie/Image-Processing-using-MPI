@@ -2,7 +2,7 @@
 
 #define CONVOLUTION
 
-#include "bmp.h"
+#include "bmp_common.h"
 
 typedef enum{
 	RIDGE,
@@ -14,7 +14,8 @@ typedef enum{
 	UNSHARP5
 }operation_t;
 
+operation_t string_to_operation(char *string);
 Image* perform_convolution_serial(const Image *img, const operation_t operation);
-Image* perform_convolution_MPI(const Image *img, const operation_t operation, const int shared_file_tree);
+Image* perform_convolution_parallel(const Image *img, const operation_t operation);
 
 #endif
