@@ -2,7 +2,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <omp.h>
-#include <time.h>
 #include "mpi.h"
 #include "convolution.h"
 #include "bmp.h"
