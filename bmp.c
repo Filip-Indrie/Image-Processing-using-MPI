@@ -33,6 +33,7 @@ Image *readBMP_serial(const char *filename)
     if (!f)
     {
         fprintf(stderr, "Error: Could not open file %s\n", filename);
+		fflush(stderr);
         return NULL;
     }
 
@@ -40,6 +41,7 @@ Image *readBMP_serial(const char *filename)
     if (fread(header, sizeof(unsigned char), 54, f) != 54)
     {
         fprintf(stderr, "Error: Invalid BMP header\n");
+		fflush(stderr);
         fclose(f);
         return NULL;
     }
@@ -47,6 +49,7 @@ Image *readBMP_serial(const char *filename)
     if (header[0] != 'B' || header[1] != 'M')
     {
         fprintf(stderr, "Error: Not a valid BMP file\n");
+		fflush(stderr);
         fclose(f);
         return NULL;
     }
@@ -61,6 +64,7 @@ Image *readBMP_serial(const char *filename)
     if (bitsPerPixel != 24)
     {
         fprintf(stderr, "Error: Only 24-bit BMPs are supported\n");
+		fflush(stderr);
         fclose(f);
         return NULL;
     }
@@ -73,6 +77,7 @@ Image *readBMP_serial(const char *filename)
     if (!data || !row_pixels)
     {
         fprintf(stderr, "Error: Memory allocation failed\n");
+		fflush(stderr);
         free(data);
         free(row_pixels);
         fclose(f);
@@ -112,6 +117,7 @@ Image *readBMP_MPI(const char *file_name, int my_rank, int num_processes, int ha
 	check = MPI_File_open(MPI_COMM_WORLD, file_name, MPI_MODE_RDONLY, MPI_INFO_NULL, &image_file_handler);
 	if(check != MPI_SUCCESS){
 		fprintf(stderr, "Rank %d: Error in readBMP_MPI while opening file %s\n", my_rank, file_name);
+		fflush(stderr);
 		return NULL;
 	}
 	
@@ -120,17 +126,24 @@ Image *readBMP_MPI(const char *file_name, int my_rank, int num_processes, int ha
 	check = MPI_File_read_at_all(image_file_handler, 0, header, 54, MPI_UNSIGNED_CHAR, MPI_STATUS_IGNORE);
 	if(check != MPI_SUCCESS){
 		fprintf(stderr, "Rank %d: Error in readBMP_MPI while reading from file file %s\n", my_rank, file_name);
+		fflush(stderr);
 		return NULL;
 	}
 	
 	if (header[0] != 'B' || header[1] != 'M'){
-		if(my_rank == 0) fprintf(stderr, "Rank %d: Error in readBMP_MPI: Not a valid BMP file\n", my_rank);
+		if(my_rank == 0){
+			fprintf(stderr, "Rank %d: Error in readBMP_MPI: Not a valid BMP file\n", my_rank);
+			fflush(stderr);
+		}
 		return NULL;
 	}
 	
 	int bitsPerPixel = *(short *)&header[28];
 	if (bitsPerPixel != 24){
-		if(my_rank == 0) fprintf(stderr, "Rank %d: Error in readBMP_MPI: Only 24-bit BMPs are supported\n", my_rank);
+		if(my_rank == 0){
+			fprintf(stderr, "Rank %d: Error in readBMP_MPI: Only 24-bit BMPs are supported\n", my_rank);
+			fflush(stderr);
+		}
 		return NULL;
 	}
 	
@@ -148,11 +161,13 @@ Image *readBMP_MPI(const char *file_name, int my_rank, int num_processes, int ha
 	check = MPI_Reduce(&local_error_flag, &global_error_flag, 1, MPI_INT, MPI_LOR, 0, MPI_COMM_WORLD);
 	if(check != MPI_SUCCESS){
 		fprintf(stderr, "Rank %d: Error in readBMP_MPI while comunicating error flag\n", my_rank);
+		fflush(stderr);
 		return NULL;
 	}
 	
 	if(my_rank == 0 && global_error_flag == 1){
 		fprintf(stderr, "Rank %d: Error in readBMP_MPI while allocating memory\n", my_rank);
+		fflush(stderr);
 		return NULL;
 	}
 	
@@ -181,18 +196,23 @@ Image *readBMP_MPI(const char *file_name, int my_rank, int num_processes, int ha
 	check = MPI_Reduce(&local_error_flag, &global_error_flag, 1, MPI_INT, MPI_LOR, 0, MPI_COMM_WORLD);
 	if(check != MPI_SUCCESS){
 		fprintf(stderr, "Rank %d: Error in readBMP_MPI while comunicating error flag\n", my_rank);
+		fflush(stderr);
 		return NULL;
 	}
 	
 	if(my_rank == 0 && global_error_flag == 1){
 		fprintf(stderr, "Rank %d: Error in readBMP_MPI while allocating memory\n", my_rank);
+		fflush(stderr);
 		return NULL;
 	}
 	
 	for (int y = 0; y < local_rows; y++){
 		check = MPI_File_read_at(image_file_handler, local_offset, row_pixels, pixel_data_size, MPI_UNSIGNED_CHAR, MPI_STATUS_IGNORE);
 		if(check != MPI_SUCCESS){
-			if(my_rank == 0) fprintf(stderr, "Rank %d: Error in readBMP_MPI while reading from file file %s\n", my_rank, file_name);
+			if(my_rank == 0){
+				fprintf(stderr, "Rank %d: Error in readBMP_MPI while reading from file file %s\n", my_rank, file_name);
+				fflush(stderr);
+			}
 			return NULL;
 		}
 		
@@ -209,6 +229,7 @@ Image *readBMP_MPI(const char *file_name, int my_rank, int num_processes, int ha
 	check = MPI_File_close(&image_file_handler);
 	if(check != MPI_SUCCESS){
 		fprintf(stderr, "Rank %d: Error in readBMP_MPI while closing file %s\n", my_rank, file_name);
+		fflush(stderr);
 		return NULL;
 	}
 	
@@ -218,11 +239,13 @@ Image *readBMP_MPI(const char *file_name, int my_rank, int num_processes, int ha
 	check = MPI_Reduce(&local_error_flag, &global_error_flag, 1, MPI_INT, MPI_LOR, 0, MPI_COMM_WORLD);
 	if(check != MPI_SUCCESS){
 		fprintf(stderr, "Rank %d: Error in readBMP_MPI while comunicating error flag\n", my_rank);
+		fflush(stderr);
 		return NULL;
 	}
 	
 	if(my_rank == 0 && global_error_flag == 1){
 		fprintf(stderr, "Rank %d: Error in readBMP_MPI while allocating memory\n", my_rank);
+		fflush(stderr);
 		return NULL;
 	}
 	
@@ -246,6 +269,7 @@ Image *compose_BMP(Image *img, int my_rank, int num_processes){
 		heights = (int*)malloc(num_processes * sizeof(int));
 		if(heights == NULL){
 			fprintf(stderr, "Rank %d: Error in compose_BMP while allocating memory\n", my_rank);
+			fflush(stderr);
 			return NULL;
 		}
 	}
@@ -253,6 +277,7 @@ Image *compose_BMP(Image *img, int my_rank, int num_processes){
 	check = MPI_Gather(&(img->height), 1, MPI_INT, heights, 1, MPI_INT, 0, MPI_COMM_WORLD);
 	if(check != MPI_SUCCESS){
 		fprintf(stderr, "Rank %d: Error in compose_BMP while comunicating height\n", my_rank);
+		fflush(stderr);
 		return NULL;
 	}
 	
@@ -260,18 +285,21 @@ Image *compose_BMP(Image *img, int my_rank, int num_processes){
 		new_img = (Image*)malloc(sizeof(Image));
 		if(new_img == NULL){
 			fprintf(stderr, "Rank %d: Error in compose_BMP while allocating memory\n", my_rank);
+			fflush(stderr);
 			return NULL;
 		}
 		
 		displacements = (int*)malloc(num_processes * sizeof(int));
 		if(displacements == NULL){
 			fprintf(stderr, "Rank %d: Error in compose_BMP while allocating memory\n", my_rank);
+			fflush(stderr);
 			return NULL;
 		}
 		
 		receives = (int*)malloc(num_processes * sizeof(int));
 		if(receives == NULL){
 			fprintf(stderr, "Rank %d: Error in compose_BMP while allocating memory\n", my_rank);
+			fflush(stderr);
 			return NULL;
 		}
 
@@ -282,6 +310,7 @@ Image *compose_BMP(Image *img, int my_rank, int num_processes){
 		data = (RGB *)malloc(width * total_height * sizeof(RGB));
 		if(data == NULL){
 			fprintf(stderr, "Rank %d: Error in compose_BMP while allocating memory\n", my_rank);
+			fflush(stderr);
 			return NULL;
 		}
 		
@@ -302,12 +331,14 @@ Image *compose_BMP(Image *img, int my_rank, int num_processes){
 	);
 	if(check != MPI_SUCCESS){
 		fprintf(stderr, "Rank %d: Error in compose_BMP while comunicating data\n", my_rank);
+		fflush(stderr);
 		return NULL;
 	}
 	
 	check = MPI_Type_free(&mpi_rgb);
 	if(check != MPI_SUCCESS){
 		fprintf(stderr, "Rank %d: Error in compose_BMP while de-allocating data type\n", my_rank);
+		fflush(stderr);
 		return NULL;
 	}
 	
@@ -336,12 +367,14 @@ int scatter_data(Image *img, RGB **data, int my_rank, int num_processes, int wid
 		heights = (int*)malloc(num_processes * sizeof(int));
 		if(heights == NULL){
 			fprintf(stderr, "Rank %d: Error in main while distributing height\n", my_rank);
+			fflush(stderr);
 			return -1;
 		}
 		
 		displacements = (int*)malloc(num_processes * sizeof(int));
 		if(displacements == NULL){
 			fprintf(stderr, "Rank %d: Error in main while distributing height\n", my_rank);
+			fflush(stderr);
 			return -1;
 		}
 		
@@ -361,6 +394,7 @@ int scatter_data(Image *img, RGB **data, int my_rank, int num_processes, int wid
 	
 	if(check != MPI_SUCCESS){
 		fprintf(stderr, "Rank %d: Error in main while distributing height\n", my_rank);
+		fflush(stderr);
 		return -1;
 	}
 	
@@ -368,6 +402,7 @@ int scatter_data(Image *img, RGB **data, int my_rank, int num_processes, int wid
 		sends = (int*)malloc(num_processes * sizeof(int));
 		if(sends == NULL){
 			fprintf(stderr, "Rank %d: Error in main while distributing height\n", my_rank);
+			fflush(stderr);
 			return -1;
 		}
 		
@@ -383,6 +418,7 @@ int scatter_data(Image *img, RGB **data, int my_rank, int num_processes, int wid
 	*data = (RGB *)malloc(width * (*local_height) * sizeof(RGB));
 	if(data == NULL){
 		fprintf(stderr, "Rank %d: Error in main while allocating memory\n", my_rank);
+		fflush(stderr);
 		return -1;
 	}
 
@@ -396,12 +432,14 @@ int scatter_data(Image *img, RGB **data, int my_rank, int num_processes, int wid
 	
 	if(check != MPI_SUCCESS){
 		fprintf(stderr, "Rank %d: Error in main while comunicating data\n", my_rank);
+		fflush(stderr);
 		return -1;
 	}
 	
 	check = MPI_Type_free(&mpi_rgb);
 	if(check != MPI_SUCCESS){
 		fprintf(stderr, "Rank %d: Error in compose_BMP while de-allocating data type\n", my_rank);
+		fflush(stderr);
 		return -1;
 	}
 	return 0;
@@ -413,6 +451,7 @@ int saveBMP(const char *filename, const Image *img)
     if (!f)
     {
         fprintf(stderr, "Error: Could not create file %s\n", filename);
+		fflush(stderr);
         return 0;
     }
 
@@ -453,6 +492,7 @@ int saveBMP(const char *filename, const Image *img)
     if (!row_pixels)
     {
         fprintf(stderr, "Error: Memory allocation failed\n");
+		fflush(stderr);
         fclose(f);
         return 0;
     }

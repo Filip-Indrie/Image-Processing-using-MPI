@@ -49,6 +49,7 @@ int get_kernel_size(const operation_t operation){
 		}
 		default:{
 			fprintf(stderr,"Invalid operation\n");
+			fflush(stderr);
 			return -1;
 		}
 	}
@@ -61,6 +62,7 @@ double* generate_kernel(const operation_t operation, int *size){
 			double *kernel = (double*)malloc(3 * 3 * sizeof(double));
 			if(kernel == NULL){
 				fprintf(stderr, "Error in generate_kernel while allocating memory\n");
+				fflush(stderr);
 				return NULL;
 			}
 			
@@ -79,6 +81,7 @@ double* generate_kernel(const operation_t operation, int *size){
 			double *kernel = (double*)malloc(3 * 3 * sizeof(double));
 			if(kernel == NULL){
 				fprintf(stderr, "Error in generate_kernel while allocating memory\n");
+				fflush(stderr);
 				return NULL;
 			}
 			
@@ -97,6 +100,7 @@ double* generate_kernel(const operation_t operation, int *size){
 			double *kernel = (double*)malloc(3 * 3 * sizeof(double));
 			if(kernel == NULL){
 				fprintf(stderr, "Error in generate_kernel while allocating memory\n");
+				fflush(stderr);
 				return NULL;
 			}
 			
@@ -115,6 +119,7 @@ double* generate_kernel(const operation_t operation, int *size){
 			double *kernel = (double*)malloc(3 * 3 * sizeof(double));
 			if(kernel == NULL){
 				fprintf(stderr, "Error in generate_kernel while allocating memory\n");
+				fflush(stderr);
 				return NULL;
 			}
 			
@@ -133,6 +138,7 @@ double* generate_kernel(const operation_t operation, int *size){
 			double *kernel = (double*)malloc(3 * 3 * sizeof(double));
 			if(kernel == NULL){
 				fprintf(stderr, "Error in generate_kernel while allocating memory\n");
+				fflush(stderr);
 				return NULL;
 			}
 			
@@ -151,6 +157,7 @@ double* generate_kernel(const operation_t operation, int *size){
 			double *kernel = (double*)malloc(5 * 5 * sizeof(double));
 			if(kernel == NULL){
 				fprintf(stderr, "Error in generate_kernel while allocating memory\n");
+				fflush(stderr);
 				return NULL;
 			}
 			
@@ -185,6 +192,7 @@ double* generate_kernel(const operation_t operation, int *size){
 			double *kernel = (double*)malloc(5 * 5 * sizeof(double));
 			if(kernel == NULL){
 				fprintf(stderr, "Error in generate_kernel while allocating memory\n");
+				fflush(stderr);
 				return NULL;
 			}
 			
@@ -217,6 +225,7 @@ double* generate_kernel(const operation_t operation, int *size){
 		}
 		default:{
 			fprintf(stderr,"Invalid operation\n");
+			fflush(stderr);
 			return NULL;
 		}
 	}
@@ -226,12 +235,14 @@ Image* perform_convolution_serial(const Image *img, const operation_t operation)
 	Image *new_img = (Image*)malloc(sizeof(Image));
 	if(new_img == NULL){
 		fprintf(stderr, "Error in perform_convolution_serial while allocating memory\n");
+		fflush(stderr);
 		return NULL;
 	}
 	
 	RGB *new_data = (RGB*)malloc(img->height * img->width * sizeof(RGB));
 	if(new_data == NULL){
 		fprintf(stderr, "Error in perform_convolution_serial while allocating memory\n");
+		fflush(stderr);
 		return NULL;
 	}
 	
@@ -286,7 +297,8 @@ Image* perform_convolution_serial(const Image *img, const operation_t operation)
 Image* perform_convolution_parallel(const Image *img, const operation_t operation, const int true_start, const int true_end, const int threads){
 	Image *new_img = (Image*)malloc(sizeof(Image));
 	if(new_img == NULL){
-		fprintf(stderr, "Error in perform_convolution_serial while allocating memory\n");
+		fprintf(stderr, "Error in perform_convolution_parallel while allocating memory\n");
+		fflush(stderr);
 		return NULL;
 	}
 	
@@ -294,7 +306,8 @@ Image* perform_convolution_parallel(const Image *img, const operation_t operatio
 	int new_height = true_end - true_start + 1;
 	RGB *new_data = (RGB*)malloc(new_height * img->width * sizeof(RGB));
 	if(new_data == NULL){
-		fprintf(stderr, "Error in perform_convolution_serial while allocating memory\n");
+		fprintf(stderr, "Error in perform_convolution_parallel while allocating memory\n");
+		fflush(stderr);
 		return NULL;
 	}
 	
@@ -311,7 +324,7 @@ Image* perform_convolution_parallel(const Image *img, const operation_t operatio
 			double r = 0, g = 0, b = 0;
 			for(int m = -kernel_size / 2; m <= kernel_size / 2; ++m){
 				for(int n = -kernel_size / 2; n <= kernel_size / 2; ++n){
-					if(i + m >= 0 && i + m < height && j + n >= 0 && j + n < width){
+					if(((i + m) >= 0) && ((i + m) < height) && ((j + n) >= 0) && ((j + n) < width)){
 						// if the pixel coresponding to kernel[m][n] is not outside the image
 						double weight = kernel[(m + kernel_size / 2) * kernel_size + (n + kernel_size / 2)];
 						RGB pixel = old_data[(i + m) * width + (j + n)];

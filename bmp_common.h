@@ -24,4 +24,8 @@ static inline void copy_RGB(const RGB *src, RGB *dest){
 	dest->b = src->b;
 }
 
+static inline int equal_RGB(const RGB rgb1, const RGB rgb2){
+	return rgb1.r == rgb2.r && rgb1.g == rgb2.g && rgb1.b == rgb2.b;
+}
+
 #endif
