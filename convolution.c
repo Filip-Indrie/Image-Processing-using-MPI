@@ -3,6 +3,7 @@
 #include <string.h>
 #include <omp.h>
 #include "convolution.h"
+#include "bmp_common.h"
 
 int min(int a, int b){
 	return (a < b) ? a : b;
