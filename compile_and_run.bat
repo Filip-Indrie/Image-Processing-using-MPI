@@ -7,4 +7,8 @@ gcc -c convolution.c
 
 gcc -g main.c -I "c:\Program Files (x86)\Microsoft SDKs\MPI\Include" -L "c:\Program Files (x86)\Microsoft SDKs\MPI\Lib\x64" -o main.exe bmp_common.o bmp_serial.o bmp_parallel.o convolution.o -lmsmpi
 
-:: mpiexec -n 5 main parallel Photos\Large.bmp Photos\Edited_Large.bmp ridge 1
+:: parallel
+:: mpiexec -n 5 main parallel Photos\Large.bmp Photos\Edited_Large.bmp sharpen 1
+
+:: serial
+:: mpiexec -n 5 main serial Photos\Large.bmp Photos\Edited_Large.bmp sharpen

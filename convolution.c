@@ -23,11 +23,40 @@ operation_t string_to_operation(char *string){
 	else return -1;
 }
 
-double* generate_kernel(const operation_t operation, int *size){
+int get_kernel_size(const operation_t operation){
 	switch(operation){
 		case RIDGE:{
-			*size = 3;
-			
+			return 3;
+		}
+		case EDGE:{
+			return 3;
+		}
+		case SHARPEN:{
+			return 3;
+		}
+		case BOXBLUR:{
+			return 3;
+		}
+		case GAUSSBLUR3:{
+			return 3;
+		}
+		case GAUSSBLUR5:{
+			return 5;
+		}
+		case UNSHARP5:{
+			return 5;
+		}
+		default:{
+			fprintf(stderr,"Invalid operation\n");
+			return -1;
+		}
+	}
+}
+
+double* generate_kernel(const operation_t operation, int *size){
+	*size = get_kernel_size(operation);
+	switch(operation){
+		case RIDGE:{
 			double *kernel = (double*)malloc(3 * 3 * sizeof(double));
 			if(kernel == NULL){
 				fprintf(stderr, "Error in generate_kernel while allocating memory\n");
@@ -46,8 +75,6 @@ double* generate_kernel(const operation_t operation, int *size){
 			return kernel;
 		}
 		case EDGE:{
-			*size = 3;
-			
 			double *kernel = (double*)malloc(3 * 3 * sizeof(double));
 			if(kernel == NULL){
 				fprintf(stderr, "Error in generate_kernel while allocating memory\n");
@@ -66,8 +93,6 @@ double* generate_kernel(const operation_t operation, int *size){
 			return kernel;
 		}
 		case SHARPEN:{
-			*size = 3;
-			
 			double *kernel = (double*)malloc(3 * 3 * sizeof(double));
 			if(kernel == NULL){
 				fprintf(stderr, "Error in generate_kernel while allocating memory\n");
@@ -86,8 +111,6 @@ double* generate_kernel(const operation_t operation, int *size){
 			return kernel;
 		}
 		case BOXBLUR:{
-			*size = 3;
-			
 			double *kernel = (double*)malloc(3 * 3 * sizeof(double));
 			if(kernel == NULL){
 				fprintf(stderr, "Error in generate_kernel while allocating memory\n");
@@ -106,8 +129,6 @@ double* generate_kernel(const operation_t operation, int *size){
 			return kernel;
 		}
 		case GAUSSBLUR3:{
-			*size = 3;
-			
 			double *kernel = (double*)malloc(3 * 3 * sizeof(double));
 			if(kernel == NULL){
 				fprintf(stderr, "Error in generate_kernel while allocating memory\n");
@@ -126,8 +147,6 @@ double* generate_kernel(const operation_t operation, int *size){
 			return kernel;
 		}
 		case GAUSSBLUR5:{
-			*size = 5;
-			
 			double *kernel = (double*)malloc(5 * 5 * sizeof(double));
 			if(kernel == NULL){
 				fprintf(stderr, "Error in generate_kernel while allocating memory\n");
@@ -162,8 +181,6 @@ double* generate_kernel(const operation_t operation, int *size){
 			return kernel;
 		}
 		case UNSHARP5:{
-			*size = 5;
-			
 			double *kernel = (double*)malloc(5 * 5 * sizeof(double));
 			if(kernel == NULL){
 				fprintf(stderr, "Error in generate_kernel while allocating memory\n");
@@ -224,8 +241,8 @@ Image* perform_convolution_serial(const Image *img, const operation_t operation)
 	double *kernel = generate_kernel(operation, &kernel_size);
 	if(kernel == NULL) return NULL; // error message was printed by the called function
 	
-	for(int i = 0; i < img->height; ++i){
-		for(int j = 0; j < img->width; ++j){
+	for(int i = 0; i < height; ++i){
+		for(int j = 0; j < width; ++j){
 			double r = 0, g = 0, b = 0;
 			for(int m = -kernel_size / 2; m <= kernel_size / 2; ++m){
 				for(int n = -kernel_size / 2; n <= kernel_size / 2; ++n){
@@ -265,9 +282,66 @@ Image* perform_convolution_serial(const Image *img, const operation_t operation)
 	return new_img;
 }
 
-Image* perform_convolution_parallel(const Image *img, const operation_t operation){
-	/**
-	*	TO BE IMPLEMENTED
-	*/
-	return NULL;
+Image* perform_convolution_parallel(const Image *img, const operation_t operation, const int true_start, const int true_end, const int threads){
+	Image *new_img = (Image*)malloc(sizeof(Image));
+	if(new_img == NULL){
+		fprintf(stderr, "Error in perform_convolution_serial while allocating memory\n");
+		return NULL;
+	}
+	
+	// convolution removes the halos
+	int new_height = true_end - true_start + 1;
+	RGB *new_data = (RGB*)malloc(new_height * img->width * sizeof(RGB));
+	if(new_data == NULL){
+		fprintf(stderr, "Error in perform_convolution_serial while allocating memory\n");
+		return NULL;
+	}
+	
+	RGB *old_data = img->data;
+	int height = img->height;
+	int width = img->width;
+	int kernel_size;
+	double *kernel = generate_kernel(operation, &kernel_size);
+	if(kernel == NULL) return NULL; // error message was printed by the called function
+	
+	#pragma omp parallel for num_threads(threads) shared(new_data, old_data, height, width, true_start, true_end, kernel_size)
+	for(int i = true_start; i <= true_end; ++i){
+		for(int j = 0; j < width; ++j){
+			double r = 0, g = 0, b = 0;
+			for(int m = -kernel_size / 2; m <= kernel_size / 2; ++m){
+				for(int n = -kernel_size / 2; n <= kernel_size / 2; ++n){
+					if(i + m >= 0 && i + m < height && j + n >= 0 && j + n < width){
+						// if the pixel coresponding to kernel[m][n] is not outside the image
+						double weight = kernel[(m + kernel_size / 2) * kernel_size + (n + kernel_size / 2)];
+						RGB pixel = old_data[(i + m) * width + (j + n)];
+						r += pixel.r * weight;
+						g += pixel.g * weight;
+						b += pixel.b * weight;
+					}
+				}
+			}
+			
+			// keeping the results from overflowing when casting to unsigned char
+			if(r < 0) r = 0;
+			else if(r > 255) r = 255;
+			
+			if(g < 0) g = 0;
+			else if(g > 255) g = 255;
+			
+			if(b < 0) b = 0;
+			else if(b > 255) b = 255;
+			
+			RGB result;
+			result.r = r;
+			result.g = g;
+			result.b = b;
+			copy_RGB(&result, &new_data[(i - true_start) * width + j]);
+		}
+	}
+	
+	new_img->height = new_height;
+	new_img->width = width;
+	new_img->data = new_data;
+	free(kernel);
+	return new_img;
 }
