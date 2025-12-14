@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <omp.h>
+#include <time.h>
 #include "mpi.h"
 #include "convolution.h"
 #include "bmp.h"
@@ -76,8 +77,11 @@ int main(int argc, char **argv){
 	else{
 		if(shared_file_tree == 1){
 			Image *parallel_edited_image, *serial_edited_image;
+			double start_parallel, end_parallel;
 			
+			if(my_rank == 0) start_parallel = omp_get_wtime();
 			parallel_edited_image = image_processing_parallel_sft(argv[2], argv[3], operation, my_rank, num_processes, NUM_CORES, 1);
+			if(my_rank == 0) end_parallel = omp_get_wtime();
 			if(parallel_edited_image == NULL){ // error message was printed by the called function
 				MPI_Abort(MPI_COMM_WORLD, -1);
 			}
@@ -87,15 +91,18 @@ int main(int argc, char **argv){
 				return 0;
 			}
 			
-			int check = image_is_correct(parallel_edited_image, argv[2], argv[3], operation);
+			int check = image_is_correct(parallel_edited_image, argv[2], argv[3], operation, end_parallel - start_parallel);
 			if(check != 0){
 				MPI_Abort(MPI_COMM_WORLD, -1);
 			}
 		}
 		else{
 			Image *parallel_edited_image, *serial_edited_image;
+			double start_parallel, end_parallel;
 			
+			if(my_rank == 0) start_parallel = omp_get_wtime();
 			parallel_edited_image = image_processing_parallel_no_sft(argv[2], argv[3], operation, my_rank, num_processes, NUM_CORES, NUM_WORKSTATIONS, 1);
+			if(my_rank == 0) end_parallel = omp_get_wtime();
 			if(parallel_edited_image == NULL){ // error message was printed by the called function
 				MPI_Abort(MPI_COMM_WORLD, -1);
 			}
@@ -105,7 +112,7 @@ int main(int argc, char **argv){
 				return 0;
 			}
 			
-			int check = image_is_correct(parallel_edited_image, argv[2], argv[3], operation);
+			int check = image_is_correct(parallel_edited_image, argv[2], argv[3], operation, end_parallel - start_parallel);
 			if(check != 0){
 				MPI_Abort(MPI_COMM_WORLD, -1);
 			}

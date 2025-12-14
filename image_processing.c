@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <omp.h>
 #include "bmp.h"
 #include "convolution.h"
 
@@ -155,9 +156,13 @@ int images_are_identical(Image *img1, Image *img2){
 	return 1;
 }
 
-int image_is_correct(Image *img, char *in_file_name, char *out_file_name, operation_t operation){
+int image_is_correct(Image *img, char *in_file_name, char *out_file_name, operation_t operation, double parallel_time){
 	Image *serial_edited_image;
+	double start_serial, end_serial;
+	
+	start_serial = omp_get_wtime();
 	serial_edited_image = image_processing_serial(in_file_name, out_file_name, operation, 0);
+	end_serial = omp_get_wtime();
 	if(serial_edited_image == NULL){ // error message was printed by the called function
 		return -1;
 	}
@@ -174,6 +179,7 @@ int image_is_correct(Image *img, char *in_file_name, char *out_file_name, operat
 		strcat(file_name, "Serial_");
 		strcat(file_name, aux + 1);
 		fprintf(stdout, "Saving the serial edited image under the name Serial_%s...\n", file_name);
+		fflush(stdout);
 		
 		int exit_code = saveBMP(file_name, serial_edited_image);
 		if(exit_code == 0){ // error message was printed by the called function
@@ -182,6 +188,9 @@ int image_is_correct(Image *img, char *in_file_name, char *out_file_name, operat
 	}
 	else{
 		fprintf(stdout, "The parallel edited image and the serial edited image are identical.\n");
+		fprintf(stdout, "Serial Time: %f\n", end_serial - start_serial);
+		fprintf(stdout, "Parallel Time: %f\n", parallel_time);
+		fprintf(stdout, "Speedup: %f\n\n", (end_serial - start_serial) / parallel_time);
 		fflush(stdout);
 	}
 	
