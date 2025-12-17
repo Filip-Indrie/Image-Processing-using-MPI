@@ -28,4 +28,12 @@ static inline int equal_RGB(const RGB rgb1, const RGB rgb2){
 	return rgb1.r == rgb2.r && rgb1.g == rgb2.g && rgb1.b == rgb2.b;
 }
 
+static inline int min(int a, int b){
+	return (a < b) ? a : b;
+}
+
+static inline int max(int a, int b){
+	return (a > b) ? a : b;
+}
+
 #endif

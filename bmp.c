@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "mpi.h"
 #include "bmp.h"
 #include "bmp_common.h"
@@ -351,6 +352,143 @@ Image *compose_BMP(Image *img, int my_rank, int num_processes){
 	else{
 		return img;
 	}
+}
+
+FILE *open_BMP(const char *filename, int *height, int *width, int *data_start, int *padding){
+	FILE *f = fopen(filename, "rb");
+    if (!f){
+        fprintf(stderr, "Error: Could not open file %s\n", filename);
+		fflush(stderr);
+        return NULL;
+    }
+
+    unsigned char header[54];
+    if (fread(header, sizeof(unsigned char), 54, f) != 54){
+        fprintf(stderr, "Error: Invalid BMP header\n");
+		fflush(stderr);
+        fclose(f);
+        return NULL;
+    }
+
+    if (header[0] != 'B' || header[1] != 'M'){
+        fprintf(stderr, "Error: Not a valid BMP file\n");
+		fflush(stderr);
+        fclose(f);
+        return NULL;
+    }
+	
+	int bitsPerPixel = *(short *)&header[28];
+	if (bitsPerPixel != 24){
+        fprintf(stderr, "Error: Only 24-bit BMPs are supported\n");
+		fflush(stderr);
+        fclose(f);
+        return NULL;
+    }
+	
+	*height = *(int *)&header[22];
+	*width = *(int *)&header[18];
+	*data_start = *(int *)&header[10];
+	
+	int row_padded = (*width * 3 + 3) & (~3);
+	int pixel_data_size = *width * 3;
+	
+	*padding = row_padded - pixel_data_size;
+	
+	return f;
+}
+
+Image *readBMP_chunk(FILE *image_file, int halo_dim, int chunk_size, int height, int width, int padding, int data_start, int *offset, int *true_start, int *true_end){
+	int pixel_data_size = width * 3;
+	int offset_stride = width * 3 + padding;
+	int next_row = (*offset - data_start) / offset_stride;
+	int halo_available = halo_dim;
+	int rows_to_read;
+	
+	if(next_row >= height){
+		Image *dummy_image = (Image*)malloc(sizeof(Image));
+		dummy_image->data = NULL;
+		return dummy_image;
+	}
+	
+	if(next_row == 0){ // first chunk doesnt have an end halo
+		if(chunk_size >= height){ // if the chunk is bigger than the image
+			rows_to_read = height;
+			*true_start = 0;
+			*true_end = rows_to_read - 1;
+		}
+		else if(chunk_size + halo_dim >= height){ // if the chunk + halo is bigger than the image
+			halo_available = halo_dim - (chunk_size + halo_dim - height);
+			rows_to_read = chunk_size + halo_available;
+			*true_start = halo_available;
+			*true_end = rows_to_read - 1;
+		}
+		else{ // chunk + halo is smaller than the image
+			rows_to_read = chunk_size + halo_dim;
+			*true_start = halo_dim;
+			*true_end = rows_to_read - 1;
+		}
+	}
+	else if(next_row + chunk_size >= height){ // last chunk doesnt have a start halo
+		rows_to_read = height - next_row + halo_dim;
+		*true_start = 0;
+		*true_end = rows_to_read - 1 - halo_dim;
+		*offset -= halo_dim * offset_stride;
+	}
+	else if(next_row + chunk_size + halo_dim >= height){ // second to last chunk may not have the entire start halo
+		halo_available = halo_dim - (next_row + chunk_size + halo_dim - height);
+		rows_to_read = chunk_size + halo_dim + halo_available;
+		*true_start = halo_available;
+		*true_end = rows_to_read - 1 - halo_dim;
+		*offset -= halo_dim * offset_stride;
+	}
+	else{ // any other chunks have both halos
+		rows_to_read = chunk_size + 2 * halo_dim;
+		*true_start = halo_dim;
+		*true_end = rows_to_read - 1 - halo_dim;
+		*offset -= halo_dim * offset_stride;
+	}
+	
+	unsigned char *row_pixels = (unsigned char*)malloc(pixel_data_size * sizeof(unsigned char));
+	if(row_pixels == NULL){
+		fprintf(stderr, "Rank 0: Error in readBMP_chunk while allocating memory\n");
+		fflush(stderr);
+		MPI_Abort(MPI_COMM_WORLD, -1);
+	}
+	
+	RGB *data = (RGB*)malloc(rows_to_read * width * sizeof(RGB));
+	if(data == NULL){
+		fprintf(stderr, "Rank 0: Error in readBMP_chunk while allocating memory\n");
+		fflush(stderr);
+		MPI_Abort(MPI_COMM_WORLD, -1);
+	}
+	
+	fseek(image_file, *offset, SEEK_SET); // moving file cursor to the offset
+	
+	for(int y = 0; y < rows_to_read; ++y){
+		fread(row_pixels, sizeof(unsigned char), pixel_data_size, image_file);
+		for (int x = 0; x < width; x++){
+            data[(rows_to_read - 1 - y) * width + x].b = row_pixels[x * 3];
+            data[(rows_to_read - 1 - y) * width + x].g = row_pixels[x * 3 + 1];
+            data[(rows_to_read - 1 - y) * width + x].r = row_pixels[x * 3 + 2];
+        }
+		if(padding > 0){
+			fseek(image_file, padding, SEEK_CUR);
+		}
+		
+		*offset += offset_stride;
+	}
+	
+	if(*true_start != 0){ // if true_start == 0 it means that this is the last chunk and that we didnt read a start halo
+		*offset -= halo_available * offset_stride;
+	}
+	
+	free(row_pixels);
+	
+	Image *image_chunk = (Image*)malloc(sizeof(Image));
+	image_chunk->width = width;
+	image_chunk->height = rows_to_read;
+	image_chunk->data = data;
+	return image_chunk;
 }
 
 int scatter_data(Image *img, RGB **data, int my_rank, int num_processes, int width, int *local_height, int halo_dim){

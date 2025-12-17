@@ -5,14 +5,6 @@
 #include "convolution.h"
 #include "bmp_common.h"
 
-int min(int a, int b){
-	return (a < b) ? a : b;
-}
-
-int max(int a, int b){
-	return (a > b) ? a : b;
-}
-
 operation_t string_to_operation(char *string){
 	if(stricmp(string, "RIDGE") == 0) return RIDGE;
 	else if (stricmp(string, "EDGE") == 0) return EDGE;
