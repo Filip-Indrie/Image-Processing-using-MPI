@@ -2,6 +2,8 @@
 
 #define BMP_COMMON
 
+#include "mpi.h"
+
 typedef struct
 {
     unsigned char r, g, b;
@@ -14,26 +16,18 @@ typedef struct
     RGB *data;
 } Image; // a BMP image as an array of RGB points
 
-/*
-*	static - makes the function private to all the files compilng it
-*	inline - wherever this function is called it replaces the function call with the body of the function
-*/
-static inline void copy_RGB(const RGB *src, RGB *dest){
-	dest->r = src->r;
-	dest->g = src->g;
-	dest->b = src->b;
-}
+typedef struct{
+	int true_start, true_end, height, width, num_threads;
+	int operation; // enum has the same size as an int
+}send_block_t;
 
-static inline int equal_RGB(const RGB rgb1, const RGB rgb2){
-	return rgb1.r == rgb2.r && rgb1.g == rgb2.g && rgb1.b == rgb2.b;
-}
+void copy_RGB(const RGB *src, RGB *dest);
+int equal_RGB(const RGB rgb1, const RGB rgb2);
+int min(int a, int b);
+int max(int a, int b);
 
-static inline int min(int a, int b){
-	return (a < b) ? a : b;
-}
-
-static inline int max(int a, int b){
-	return (a > b) ? a : b;
-}
+MPI_Datatype create_mpi_datatype_for_RGB();
+MPI_Datatype create_mpi_datatype_for_send_block_t();
+int deallocate_MPI_datatype(MPI_Datatype *type, int my_rank);
 
 #endif

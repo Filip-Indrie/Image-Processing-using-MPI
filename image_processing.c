@@ -12,7 +12,13 @@
 #define TERMINATE_TAG 5
 
 Image *image_processing_serial(const char *in_file_name, const char *out_file_name, operation_t operation, int save){
-	Image *img = readBMP_serial(in_file_name);
+	/**
+	*	Takes in a file path to the file to edit, a file path to the location where to save the edited image,
+	*	an operation_t, and whether to save edited Image or not.
+	*	It reads the .bmp file, edits the Image, saves the edited Image (if specified) and returns the edited Image.
+	*/
+	
+	Image *img = read_BMP_serial(in_file_name);
 	if(img == NULL){ // error message was printed by the called function
 		return NULL;
 	}
@@ -26,8 +32,8 @@ Image *image_processing_serial(const char *in_file_name, const char *out_file_na
 	}
 	
 	if(save == 1){
-		int exit_code = saveBMP(out_file_name, edited_img);
-		if(exit_code == 0){ // error message was printed by the called function
+		int exit_code = save_BMP(out_file_name, edited_img);
+		if(exit_code == -1){ // error message was printed by the called function
 			return NULL;
 		}
 	}
@@ -35,11 +41,20 @@ Image *image_processing_serial(const char *in_file_name, const char *out_file_na
 }
 
 Image *image_processing_parallel_sft(const char *in_file_name, const char *out_file_name, operation_t operation, int my_rank, int num_processes, int num_cores, int save){
+	/**
+	*	Takes in a file path to the file to edit, a file path to the location where to save the edited image,
+	*	an operation_t, this process's rank, the total number of processes, the number of cores on this workstation
+	*	and whether to save edited Image or not.
+	*	It reads the process's associated chunk of the .bmp file, edits the Image chunk
+	*	and, if rank != 0, sends the edited Image chunk to process 0 and returns the edited Image chunk,
+	*	and if rank == 0, saves the whole edited Image (if specified) and returns the whole edited Image.
+	*/
+	
 	int kernel_size = get_kernel_size(operation);
 	int halo_dim = kernel_size / 2;
 	int true_start, true_end;
 	
-	Image *img = readBMP_MPI(in_file_name, my_rank, num_processes, halo_dim, &true_start, &true_end);
+	Image *img = read_BMP_MPI(in_file_name, my_rank, num_processes, halo_dim, &true_start, &true_end);
 	if(img == NULL){ // error message was printed by the called function
 		return NULL;
 	}
@@ -62,8 +77,10 @@ Image *image_processing_parallel_sft(const char *in_file_name, const char *out_f
 	free(edited_img);
 	
 	if(save == 1 && my_rank == 0){
-		int exit_code = saveBMP(out_file_name, composed_img);
-		if(exit_code == 0){ // error message was printed by the called function
+		int exit_code = save_BMP(out_file_name, composed_img);
+		if(exit_code == -1){ // error message was printed by the called function
+			free(composed_img->data);
+			free(composed_img);
 			return NULL;
 		}
 	}
@@ -71,7 +88,117 @@ Image *image_processing_parallel_sft(const char *in_file_name, const char *out_f
 	return composed_img;
 }
 
+int scatter_data(Image *img, RGB **data, int my_rank, int num_processes, int width, int *local_height, int halo_dim){
+	/**
+	*	Takes in an Image, a RGB data buffer, this process's rank, the total number of processes,
+	*	the width of the Image and the size of the halo.
+	*	If rank == 0, the process calculates how many rows (local_height) of the image each process gets,
+	*	informs each process about their height and sends them (including process 0) local_height rows of the Image.
+	*	If rank != 0, the process receives their respective number of rows (local_height) and their respective rows.
+	*/
+	
+	int check = 0;
+	int *heights = NULL;
+	int *displacements = NULL;
+	int *sends = NULL;
+	RGB *old_data = (img != NULL) ? img->data : NULL;
+	
+	if(my_rank == 0){
+		int individual_height = img->height / num_processes;
+		int remainder = img->height % num_processes;
+		
+		heights = (int*)malloc(num_processes * sizeof(int));
+		if(heights == NULL){
+			fprintf(stderr, "Rank %d: Error in main while distributing height\n", my_rank);
+			fflush(stderr);
+			return -1;
+		}
+		
+		displacements = (int*)malloc(num_processes * sizeof(int));
+		if(displacements == NULL){
+			fprintf(stderr, "Rank %d: Error in main while distributing height\n", my_rank);
+			fflush(stderr);
+			return -1;
+		}
+		
+		for(int i = 0; i < num_processes; ++i){
+			heights[i] = individual_height + ((i < remainder) ? 1 : 0);
+			if(i == 0 || i == num_processes - 1) heights[i] += halo_dim;
+			else heights[i] += 2 * halo_dim;
+		}
+	}
+	
+	// sending local_height to every process
+	check = MPI_Scatter(
+		heights, 1, MPI_INT,
+		local_height, 1, MPI_INT,
+		0, MPI_COMM_WORLD
+	);
+	
+	if(check != MPI_SUCCESS){
+		fprintf(stderr, "Rank %d: Error in main while distributing height\n", my_rank);
+		fflush(stderr);
+		return -1;
+	}
+	
+	if(my_rank == 0){
+		sends = (int*)malloc(num_processes * sizeof(int));
+		if(sends == NULL){
+			fprintf(stderr, "Rank %d: Error in main while distributing height\n", my_rank);
+			fflush(stderr);
+			return -1;
+		}
+		
+		int offset = 0;
+		for(int i = 0; i < num_processes; ++i){
+			displacements[i] = offset;
+			offset += (heights[i] - 2 * halo_dim) * width;
+			sends[i] = heights[i] * width;
+		}
+	}
+	
+	// allocating data
+	*data = (RGB *)malloc(width * (*local_height) * sizeof(RGB));
+	if(data == NULL){
+		fprintf(stderr, "Rank %d: Error in main while allocating memory\n", my_rank);
+		fflush(stderr);
+		return -1;
+	}
+
+	MPI_Datatype mpi_rgb = create_mpi_datatype_for_RGB();
+	
+	check = MPI_Scatterv(
+		old_data, sends, displacements, mpi_rgb,
+		*data, (*local_height) * width, mpi_rgb,
+		0, MPI_COMM_WORLD
+	);
+	
+	if(check != MPI_SUCCESS){
+		fprintf(stderr, "Rank %d: Error in main while comunicating data\n", my_rank);
+		fflush(stderr);
+		return -1;
+	}
+	
+	check = MPI_Type_free(&mpi_rgb);
+	if(check != MPI_SUCCESS){
+		fprintf(stderr, "Rank %d: Error in compose_BMP while de-allocating data type\n", my_rank);
+		fflush(stderr);
+		return -1;
+	}
+	return 0;
+}
+
 Image *image_processing_parallel_no_sft(const char *in_file_name, const char *out_file_name, operation_t operation, int my_rank, int num_processes, int num_cores, int num_workstations, int save){
+	/**
+	*	Takes in a file path to the file to edit, a file path to the location where to save the edited image,
+	*	an operation_t, this process's rank, the total number of processes, the number of cores on this workstation,
+	*	the total number of workstations and whether to save edited Image or not.
+	*	If rank == 0, the process reads the whole .bmp file, distributes chunks of the Image to each process (including process 0),
+	*	edits its respective chunk, composes the whole edited Image, saves it (if specified) and returns the whole edited Image.
+	*	If rank != 0, the process receives its respective chunk, edits it, sends the edited chunk to process 0
+	*	and returns the edited Image chunk.
+	*/
+	
 	int kernel_size = get_kernel_size(operation);
 	int halo_dim = kernel_size / 2;
 	int check;
@@ -81,7 +208,7 @@ Image *image_processing_parallel_no_sft(const char *in_file_name, const char *ou
 	Image *img = NULL;
 	
 	if(my_rank == 0){
-		img = readBMP_serial(in_file_name);
+		img = read_BMP_serial(in_file_name);
 		if(img == NULL){ // error message was printed by the called function
 			return NULL;
 		}
@@ -90,7 +217,6 @@ Image *image_processing_parallel_no_sft(const char *in_file_name, const char *ou
 		height = img->height;
 	}
 	
-	// broadcasting width
 	check = MPI_Bcast(&width, 1, MPI_INT, 0, MPI_COMM_WORLD);
 	if(check != MPI_SUCCESS){
 		fprintf(stderr, "Rank %d: Error in main while broadcasting width\n", my_rank);
@@ -120,8 +246,10 @@ Image *image_processing_parallel_no_sft(const char *in_file_name, const char *ou
 	new_image->data = data;
 	
 	int true_start, true_end;
+	
 	if(my_rank > 0) true_start = halo_dim;
 	else true_start = 0;
+	
 	if(my_rank < num_processes - 1) true_end = local_height - halo_dim - 1;
 	else true_end = local_height - 1;
 	
@@ -141,8 +269,8 @@ Image *image_processing_parallel_no_sft(const char *in_file_name, const char *ou
 	free(edited_img);
 	
 	if(save == 1 && my_rank == 0){
-		int exit_code = saveBMP(out_file_name, composed_img);
-		if(exit_code == 0){ // error message was printed by the called function
+		int exit_code = save_BMP(out_file_name, composed_img);
+		if(exit_code == -1){ // error message was printed by the called function
 			return NULL;
 		}
 	}
@@ -150,68 +278,31 @@ Image *image_processing_parallel_no_sft(const char *in_file_name, const char *ou
 	return composed_img;
 }
 
-int images_are_identical(Image *img1, Image *img2){
-	if(img1->height != img2->height || img1->width != img2->width) return 0;
+int send_work(int worker_process, operation_t operation, int *work_done, FILE *image_file, int halo_dim, int chunk_size, int height, int width, int padding, int data_start, int *offset, int num_threads){
+	/**
+	*	Takes in the rank of the procees which needs to receive work, an operation_t,
+	*	a FILE* coresponding to the open .bmp file, the size of the halo, the size of a chunk,
+	*	the height, width, data_start and padding of the Image, the offset at which to read
+	* 	and the number of threads the worker process can use.
+	*	It reads a chunk of the Image and sends it, along with the required data, to the worker process.
+	*	If there is no more work to be done, it sets work_done to 1 and returns without sending any work to the worker process.
+	*/
 	
-	for(int i = 0; i < img1->height; ++i){
-		for(int j = 0; j < img1->width; ++j){
-			if(equal_RGB((img1->data)[i * img1->width + j], (img2->data)[i * img2->width + j]) == 0) return 0;
-		}
-	}
-	
-	return 1;
-}
-
-typedef struct{
-	int true_start, true_end, height, width, num_threads;
-	operation_t operation;
-}send_block_t;
-
-MPI_Datatype create_mpi_datatype_for_send_block_t(){
-	send_block_t block;
-	MPI_Datatype mpi_block;
-	MPI_Datatype types[6] = {MPI_INT, MPI_INT, MPI_INT, MPI_INT, MPI_INT, MPI_INT};
-	int block_lengths[6] = {1, 1, 1, 1, 1, 1};
-	MPI_Aint displacements[6];
-	
-	// getting field addresses
-	MPI_Get_address(&block.true_start, &displacements[0]);
-	MPI_Get_address(&block.true_end, &displacements[1]);
-	MPI_Get_address(&block.height, &displacements[2]);
-	MPI_Get_address(&block.width, &displacements[3]);
-	MPI_Get_address(&block.num_threads, &displacements[4]);
-	MPI_Get_address(&block.operation, &displacements[5]);
-	
-	// making displacements relative to the first field
-	displacements[5] -= displacements[0];
-	displacements[4] -= displacements[0];
-	displacements[3] -= displacements[0];
-	displacements[2] -= displacements[0];
-	displacements[1] -= displacements[0];
-	displacements[0] -= displacements[0];
-	
-	// creating struct
-	MPI_Type_create_struct(6, block_lengths, displacements, types, &mpi_block);
-	MPI_Type_commit(&mpi_block);
-	return mpi_block;
-}
-
-void send_work(int worker_process, int operation, int *work_done, FILE *image_file, int halo_dim, int chunk_size, int height, int width, int padding, int data_start, int *offset, int num_threads){
 	int true_start, true_end, check;
 	Image *chunk_image = NULL;
 	MPI_Datatype mpi_send_block = create_mpi_datatype_for_send_block_t();
 	MPI_Datatype mpi_rgb = create_mpi_datatype_for_RGB();
 	
-	chunk_image = readBMP_chunk(image_file, halo_dim, chunk_size, height, width, padding, data_start, offset, &true_start, &true_end);
+	chunk_image = read_BMP_chunk(image_file, halo_dim, chunk_size, height, width, padding, data_start, offset, &true_start, &true_end);
 	if(chunk_image == NULL){ // error message was printed by the called function
-		MPI_Abort(MPI_COMM_WORLD, -1);
+		return -1;
 	}
 
 	if(chunk_image->data == NULL){
 		*work_done = 1;
 		fclose(image_file);
 		free(chunk_image);
-		return;
+		return 0;
 	}
 
 	send_block_t block;
@@ -226,23 +317,67 @@ void send_work(int worker_process, int operation, int *work_done, FILE *image_fi
 	if(check != MPI_SUCCESS){
 		fprintf(stderr, "Rank 0: Error in master_process while sending work header\n");
 		fflush(stderr);
-		MPI_Abort(MPI_COMM_WORLD, -1);
+		
+		check = deallocate_MPI_datatype(&mpi_send_block, 0);
+		if(check == -1){ // error message was printed by the called function
+			return -1;
+		}
+		
+		check = deallocate_MPI_datatype(&mpi_rgb, 0);
+		if(check == -1){ // error message was printed by the called function
+			return -1;
+		}
+		
+		return -1;
 	}
 
 	check = MPI_Send(chunk_image->data, chunk_image->height * chunk_image->width, mpi_rgb, worker_process, WORK_DATA_SEND_TAG, MPI_COMM_WORLD);
 	if(check != MPI_SUCCESS){
 		fprintf(stderr, "Rank 0: Error in master_process while sending work data\n");
 		fflush(stderr);
-		MPI_Abort(MPI_COMM_WORLD, -1);
+		
+		check = deallocate_MPI_datatype(&mpi_send_block, 0);
+		if(check == -1){ // error message was printed by the called function
+			return -1;
+		}
+		
+		check = deallocate_MPI_datatype(&mpi_rgb, 0);
+		if(check == -1){ // error message was printed by the called function
+			return -1;
+		}
+		
+		return -1;
+	}
+	
+	check = deallocate_MPI_datatype(&mpi_send_block, 0);
+	if(check == -1){ // error message was printed by the called function
+		return -1;
+	}
+	
+	check = deallocate_MPI_datatype(&mpi_rgb, 0);
+	if(check == -1){ // error message was printed by the called function
+		return -1;
 	}
 	
 	free(chunk_image->data);
 	free(chunk_image);
+	return 0;
 }
 
 Image *master_process(const char *in_file_name, const char *out_file_name, operation_t operation, int chunk, int num_processes, int num_threads, int save){
+	/**
+	*	Takes in a file path to the file to edit, a file path to the location where to save the edited image,
+	*	an operation_t, the size of a chunk, the total number of processes, the number of threads on available to each process,
+	*	and whether to save edited Image or not.
+	*	It opens the .bmp file and reads and sends a chunk to each worker process. After that, to each worker process
+	*	that finishes its work, it collects the edited chunk and sends another chunk to the worker process
+	*	until there are no more chunks to process. At that point, it waits for all the worker processes to finish their work,
+	*	collects their edited chunks and terminates the process. It then returns the whole edited Image.
+	*/
+	
 	int kernel_size = get_kernel_size(operation);
 	int halo_dim = kernel_size / 2;
+	
 	int check;
 	int active_workers = 0;
 	int height, width, data_start, padding;
@@ -253,7 +388,7 @@ Image *master_process(const char *in_file_name, const char *out_file_name, opera
 	
 	FILE *image_file = open_BMP(in_file_name, &height, &width, &data_start, &padding);
 	if(image_file == NULL){ // error message was printed by the called function
-		MPI_Abort(MPI_COMM_WORLD, -1);
+		return NULL;
 	}
 	
 	offset = data_start;
@@ -262,14 +397,39 @@ Image *master_process(const char *in_file_name, const char *out_file_name, opera
 	if(new_data == NULL){
 		fprintf(stderr, "Rank 0: Error in master_process while allocating memory\n");
 		fflush(stderr);
-		MPI_Abort(MPI_COMM_WORLD, -1);
+		fclose(image_file);
+		
+		check = deallocate_MPI_datatype(&mpi_send_block, 0);
+		if(check == -1){ // error message was printed by the called function
+			return NULL;
+		}
+		
+		check = deallocate_MPI_datatype(&mpi_rgb, 0);
+		if(check == -1){ // error message was printed by the called function
+			return NULL;
+		}
+		
+		return NULL;
 	}
 	
 	Image *new_image = (Image*)malloc(sizeof(Image));
 	if(new_image == NULL){
 		fprintf(stderr, "Rank 0: Error in master_process while allocating memory\n");
 		fflush(stderr);
-		MPI_Abort(MPI_COMM_WORLD, -1);
+		free(new_data);
+		fclose(image_file);
+		
+		check = deallocate_MPI_datatype(&mpi_send_block, 0);
+		if(check == -1){ // error message was printed by the called function
+			return NULL;
+		}
+		
+		check = deallocate_MPI_datatype(&mpi_rgb, 0);
+		if(check == -1){ // error message was printed by the called function
+			return NULL;
+		}
+		
+		return NULL;
 	}
 	
 	// distributing initial work to all the processes
@@ -278,24 +438,71 @@ Image *master_process(const char *in_file_name, const char *out_file_name, opera
 		if(work_done == 0){
 			++active_workers;
 			work_from_rows[i] = (offset - data_start) / (3 * width + padding);
-			send_work(i, operation, &work_done, image_file, halo_dim, chunk, height, width, padding, data_start, &offset, num_threads);
-			if(work_done == 1){ // remove the worker that was terminated 
+			
+			check = send_work(i, operation, &work_done, image_file, halo_dim, chunk, height, width, padding, data_start, &offset, num_threads);
+			if(check == -1){ // error message was printed by the called function
+				free(new_data);
+				free(new_image);
+				fclose(image_file);
+				
+				check = deallocate_MPI_datatype(&mpi_send_block, 0);
+				if(check == -1){ // error message was printed by the called function
+					return NULL;
+				}
+				
+				check = deallocate_MPI_datatype(&mpi_rgb, 0);
+				if(check == -1){ // error message was printed by the called function
+					return NULL;
+				}
+				
+				return NULL;
+			}
+			
+			if(work_done == 1){ // remove and terminate the current worker
 				--active_workers;
 				check = MPI_Send(NULL, 0, MPI_BYTE, i, TERMINATE_TAG, MPI_COMM_WORLD);
 				if(check != MPI_SUCCESS){
 					fprintf(stderr, "Rank 0: Error in master_process while sending terminate order\n");
 					fflush(stderr);
-					MPI_Abort(MPI_COMM_WORLD, -1);
+					free(new_data);
+					free(new_image);
+					fclose(image_file);
+					
+					check = deallocate_MPI_datatype(&mpi_send_block, 0);
+					if(check == -1){ // error message was printed by the called function
+						return NULL;
+					}
+					
+					check = deallocate_MPI_datatype(&mpi_rgb, 0);
+					if(check == -1){ // error message was printed by the called function
+						return NULL;
+					}
+					
+					return NULL;
 				}
 			}
 		}
 		else{
 			check = MPI_Send(NULL, 0, MPI_BYTE, i, TERMINATE_TAG, MPI_COMM_WORLD);
 			if(check != MPI_SUCCESS){
-				fprintf(stderr, "Rank 0: Error in master_process while sending terminate order\n");
-				fflush(stderr);
-				MPI_Abort(MPI_COMM_WORLD, -1);
-			}
+					fprintf(stderr, "Rank 0: Error in master_process while sending terminate order\n");
+					fflush(stderr);
+					free(new_data);
+					free(new_image);
+					fclose(image_file);
+					
+					check = deallocate_MPI_datatype(&mpi_send_block, 0);
+					if(check == -1){ // error message was printed by the called function
+						return NULL;
+					}
+					
+					check = deallocate_MPI_datatype(&mpi_rgb, 0);
+					if(check == -1){ // error message was printed by the called function
+						return NULL;
+					}
+					
+					return NULL;
+				}
 		}
 	}
 	
@@ -310,7 +517,21 @@ Image *master_process(const char *in_file_name, const char *out_file_name, opera
 		if(check != MPI_SUCCESS){
 			fprintf(stderr, "Rank 0: Error in master_process while receiving work header\n");
 			fflush(stderr);
-			MPI_Abort(MPI_COMM_WORLD, -1);
+			free(new_data);
+			free(new_image);
+			fclose(image_file);
+			
+			check = deallocate_MPI_datatype(&mpi_send_block, 0);
+			if(check == -1){ // error message was printed by the called function
+				return NULL;
+			}
+			
+			check = deallocate_MPI_datatype(&mpi_rgb, 0);
+			if(check == -1){ // error message was printed by the called function
+				return NULL;
+			}
+			
+			return NULL;
 		}
 		
 		worker_rank = status.MPI_SOURCE;
@@ -322,7 +543,21 @@ Image *master_process(const char *in_file_name, const char *out_file_name, opera
 		if(check != MPI_SUCCESS){
 			fprintf(stderr, "Rank 0: Error in master_process while receiving work data\n");
 			fflush(stderr);
-			MPI_Abort(MPI_COMM_WORLD, -1);
+			free(new_data);
+			free(new_image);
+			fclose(image_file);
+			
+			check = deallocate_MPI_datatype(&mpi_send_block, 0);
+			if(check == -1){ // error message was printed by the called function
+				return NULL;
+			}
+			
+			check = deallocate_MPI_datatype(&mpi_rgb, 0);
+			if(check == -1){ // error message was printed by the called function
+				return NULL;
+			}
+			
+			return NULL;
 		}
 		
 		if(work_done == 1){
@@ -330,26 +565,83 @@ Image *master_process(const char *in_file_name, const char *out_file_name, opera
 			if(check != MPI_SUCCESS){
 				fprintf(stderr, "Rank 0: Error in master_process while sending terminate order\n");
 				fflush(stderr);
-				MPI_Abort(MPI_COMM_WORLD, -1);
+				free(new_data);
+				free(new_image);
+				fclose(image_file);
+				
+				check = deallocate_MPI_datatype(&mpi_send_block, 0);
+				if(check == -1){ // error message was printed by the called function
+					return NULL;
+				}
+				
+				check = deallocate_MPI_datatype(&mpi_rgb, 0);
+				if(check == -1){ // error message was printed by the called function
+					return NULL;
+				}
+				
+				return NULL;
 			}
 			--active_workers;
 		}
 		else{
 			work_from_rows[worker_rank] = (offset - data_start) / (3 * width + padding);
-			send_work(worker_rank, operation, &work_done, image_file, halo_dim, chunk, height, width, padding, data_start, &offset, num_threads);
-			if(work_done == 1){ // remove and terminate the worker
+			
+			check = send_work(worker_rank, operation, &work_done, image_file, halo_dim, chunk, height, width, padding, data_start, &offset, num_threads);
+			if(check == -1){ // error message was printed by the called function
+				free(new_data);
+				free(new_image);
+				fclose(image_file);
+				
+				check = deallocate_MPI_datatype(&mpi_send_block, 0);
+				if(check == -1){ // error message was printed by the called function
+					return NULL;
+				}
+				
+				check = deallocate_MPI_datatype(&mpi_rgb, 0);
+				if(check == -1){ // error message was printed by the called function
+					return NULL;
+				}
+				
+				return NULL;
+			}
+			
+			if(work_done == 1){ // remove and terminate the current worker
 				--active_workers;
+				
 				check = MPI_Send(NULL, 0, MPI_BYTE, worker_rank, TERMINATE_TAG, MPI_COMM_WORLD);
 				if(check != MPI_SUCCESS){
 					fprintf(stderr, "Rank 0: Error in master_process while sending terminate order\n");
 					fflush(stderr);
-					MPI_Abort(MPI_COMM_WORLD, -1);
+					free(new_data);
+					free(new_image);
+					fclose(image_file);
+					
+					check = deallocate_MPI_datatype(&mpi_send_block, 0);
+					if(check == -1){ // error message was printed by the called function
+						return NULL;
+					}
+					
+					check = deallocate_MPI_datatype(&mpi_rgb, 0);
+					if(check == -1){ // error message was printed by the called function
+						return NULL;
+					}
+					
+					return NULL;
 				}
 			}
 		}
 	}
 	
 	fclose(image_file);
+	check = deallocate_MPI_datatype(&mpi_send_block, 0);
+	if(check == -1){ // error message was printed by the called function
+		return NULL;
+	}
+	
+	check = deallocate_MPI_datatype(&mpi_rgb, 0);
+	if(check == -1){ // error message was printed by the called function
+		return NULL;
+	}
 	
 	new_image->height = height;
 	new_image->width = width;
@@ -357,7 +649,12 @@ Image *master_process(const char *in_file_name, const char *out_file_name, opera
 	return new_image;
 }
 
-void worker_process(int my_rank){
+int worker_process(int my_rank){
+	/**
+	*	Takes in this process's rank.
+	*	It receives a chunk of an Image from process 0, which it edits and sends back to process 0.
+	*/
+	
 	MPI_Status status;
 	MPI_Datatype mpi_send_block = create_mpi_datatype_for_send_block_t();
 	MPI_Datatype mpi_rgb = create_mpi_datatype_for_RGB();
@@ -370,7 +667,18 @@ void worker_process(int my_rank){
 		if(check != MPI_SUCCESS){
 			fprintf(stderr, "Rank %d: Error in worker_process while probing for incoming messages\n", my_rank);
 			fflush(stderr);
-			MPI_Abort(MPI_COMM_WORLD, -1);
+			
+			check = deallocate_MPI_datatype(&mpi_send_block, my_rank);
+			if(check == -1){ // error message was printed by the called function
+				return -1;
+			}
+			
+			check = deallocate_MPI_datatype(&mpi_rgb, my_rank);
+			if(check == -1){ // error message was printed by the called function
+				return -1;
+			}
+			
+			return -1;
 		}
 		
 		if(status.MPI_TAG == TERMINATE_TAG){
@@ -379,7 +687,18 @@ void worker_process(int my_rank){
 			if(check != MPI_SUCCESS){
 				fprintf(stderr, "Rank %d: Error in worker_process while consuming termination message\n", my_rank);
 				fflush(stderr);
-				MPI_Abort(MPI_COMM_WORLD, -1);
+				
+				check = deallocate_MPI_datatype(&mpi_send_block, my_rank);
+				if(check == -1){ // error message was printed by the called function
+					return -1;
+				}
+				
+				check = deallocate_MPI_datatype(&mpi_rgb, my_rank);
+				if(check == -1){ // error message was printed by the called function
+					return -1;
+				}
+				
+				return -1;
 			}
 		}
 		else if(status.MPI_TAG == WORK_HEADER_SEND_TAG){
@@ -387,28 +706,75 @@ void worker_process(int my_rank){
 			if(check != MPI_SUCCESS){
 				fprintf(stderr, "Rank %d: Error in worker_process while receiving work header\n", my_rank);
 				fflush(stderr);
-				MPI_Abort(MPI_COMM_WORLD, -1);
+				
+				check = deallocate_MPI_datatype(&mpi_send_block, my_rank);
+				if(check == -1){ // error message was printed by the called function
+					return -1;
+				}
+				
+				check = deallocate_MPI_datatype(&mpi_rgb, my_rank);
+				if(check == -1){ // error message was printed by the called function
+					return -1;
+				}
+				
+				return -1;
 			}
 			
 			RGB *data = (RGB*)malloc(header.height * header.width * sizeof(RGB));
 			if(data == NULL){
 				fprintf(stderr, "Rank %d: Error in worker_process while allocating memory\n", my_rank);
 				fflush(stderr);
-				MPI_Abort(MPI_COMM_WORLD, -1);
+				
+				check = deallocate_MPI_datatype(&mpi_send_block, my_rank);
+				if(check == -1){ // error message was printed by the called function
+					return -1;
+				}
+				
+				check = deallocate_MPI_datatype(&mpi_rgb, my_rank);
+				if(check == -1){ // error message was printed by the called function
+					return -1;
+				}
+				
+				return -1;
 			}
 			
 			Image *img = (Image*)malloc(sizeof(Image));
 			if(img == NULL){
 				fprintf(stderr, "Rank %d: Error in worker_process while allocating memory\n", my_rank);
 				fflush(stderr);
-				MPI_Abort(MPI_COMM_WORLD, -1);
+				free(data);
+				
+				check = deallocate_MPI_datatype(&mpi_send_block, my_rank);
+				if(check == -1){ // error message was printed by the called function
+					return -1;
+				}
+				
+				check = deallocate_MPI_datatype(&mpi_rgb, my_rank);
+				if(check == -1){ // error message was printed by the called function
+					return -1;
+				}
+				
+				return -1;
 			}
 			
 			check = MPI_Recv(data, header.height * header.width, mpi_rgb, 0, WORK_DATA_SEND_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 			if(check != MPI_SUCCESS){
 				fprintf(stderr, "Rank %d: Error in worker_process while receiving work data\n", my_rank);
 				fflush(stderr);
-				MPI_Abort(MPI_COMM_WORLD, -1);
+				free(data);
+				free(img);
+				
+				check = deallocate_MPI_datatype(&mpi_send_block, my_rank);
+				if(check == -1){ // error message was printed by the called function
+					return -1;
+				}
+				
+				check = deallocate_MPI_datatype(&mpi_rgb, my_rank);
+				if(check == -1){ // error message was printed by the called function
+					return -1;
+				}
+				
+				return -1;
 			}
 			
 			img->height = header.height;
@@ -417,7 +783,20 @@ void worker_process(int my_rank){
 			
 			Image *new_image = perform_convolution_parallel(img, header.operation, header.true_start, header.true_end, header.num_threads);
 			if(new_image == NULL){ // error message was printed by the called function
-				MPI_Abort(MPI_COMM_WORLD, -1);
+				free(img->data);
+				free(img);
+				
+				check = deallocate_MPI_datatype(&mpi_send_block, my_rank);
+				if(check == -1){ // error message was printed by the called function
+					return -1;
+				}
+				
+				check = deallocate_MPI_datatype(&mpi_rgb, my_rank);
+				if(check == -1){ // error message was printed by the called function
+					return -1;
+				}
+				
+				return -1;
 			}
 			
 			free(img->data);
@@ -432,14 +811,40 @@ void worker_process(int my_rank){
 			if(check != MPI_SUCCESS){
 				fprintf(stderr, "Rank %d: Error in worker_process while sending work header\n", my_rank);
 				fflush(stderr);
-				MPI_Abort(MPI_COMM_WORLD, -1);
+				free(new_image->data);
+				free(new_image);
+				
+				check = deallocate_MPI_datatype(&mpi_send_block, my_rank);
+				if(check == -1){ // error message was printed by the called function
+					return -1;
+				}
+				
+				check = deallocate_MPI_datatype(&mpi_rgb, my_rank);
+				if(check == -1){ // error message was printed by the called function
+					return -1;
+				}
+				
+				return -1;
 			}
 			
 			check = MPI_Send(new_image->data, header.height * header.width, mpi_rgb, 0, WORK_DATA_RECEIVE_TAG, MPI_COMM_WORLD);
 			if(check != MPI_SUCCESS){
 				fprintf(stderr, "Rank %d: Error in worker_process while sending work data\n", my_rank);
 				fflush(stderr);
-				MPI_Abort(MPI_COMM_WORLD, -1);
+				free(new_image->data);
+				free(new_image);
+				
+				check = deallocate_MPI_datatype(&mpi_send_block, my_rank);
+				if(check == -1){ // error message was printed by the called function
+					return -1;
+				}
+				
+				check = deallocate_MPI_datatype(&mpi_rgb, my_rank);
+				if(check == -1){ // error message was printed by the called function
+					return -1;
+				}
+				
+				return -1;
 			}
 			
 			free(new_image->data);
@@ -447,20 +852,42 @@ void worker_process(int my_rank){
 		}
 	}
 	
-	MPI_Finalize();
+	check = deallocate_MPI_datatype(&mpi_send_block, my_rank);
+	if(check == -1){ // error message was printed by the called function
+		return -1;
+	}
+	
+	check = deallocate_MPI_datatype(&mpi_rgb, my_rank);
+	if(check == -1){ // error message was printed by the called function
+		return -1;
+	}
+
+	return 0;
 }
 
 Image *image_processing_master(const char *in_file_name, const char *out_file_name, operation_t operation, int chunk_size, int my_rank, int num_processes, int num_cores, int num_workstations, int save){
+	/**
+	*	Takes in a file path to the file to edit, a file path to the location where to save the edited image,
+	*	an operation_t, the size of a chunk, this process's rank, the total number of processes,
+	*	the number of available cores on this workstation, the number of workstations
+	*	and whether to save edited Image or not.
+	*	If rank == 0, it calls master_process with the appropriate arguments,
+	*	saves the whole edited image (if specified) and returns the whole edited Image.
+	*	If rank != 0, it calls worker_process with the appropriate arguments and returns a `dummy` Image.
+	*/
+	
 	if(my_rank == 0){ // MASTER
 		Image *img = NULL;
 		int num_threads = max(1, num_cores / (num_processes / num_workstations));
 
-		// can't return NULL
 		img = master_process(in_file_name, out_file_name, operation, chunk_size, num_processes, num_threads, save);
+		if(img == NULL){ // error message was printed by the called function
+			return NULL;
+		}
 		
 		if(save == 1){
-			int exit_code = saveBMP(out_file_name, img);
-			if(exit_code == 0){ // error message was printed by the called function
+			int exit_code = save_BMP(out_file_name, img);
+			if(exit_code == -1){ // error message was printed by the called function
 				return NULL;
 			}
 		}
@@ -468,12 +895,50 @@ Image *image_processing_master(const char *in_file_name, const char *out_file_na
 		return img;
 	}
 	else{ // WORKER
-		worker_process(my_rank);
-		return NULL;
+		int check = worker_process(my_rank);
+		if(check == -1){
+			return NULL;
+		}
+		
+		Image *dummy = (Image*)malloc(sizeof(Image));
+		if(dummy == NULL){
+			fprintf(stderr, "Rank %d: Error in image_processing_master while allocating memory\n", my_rank);
+			fflush(stderr);
+			return NULL;
+		}
+		
+		dummy->data = NULL;
+		return dummy;
 	}
 }
 
+int images_are_identical(Image *img1, Image *img2){
+	/**
+	*	Takes in 2 Images and returns 1 if they are identical and 0 otherwise.
+	*/
+	
+	if(img1->height != img2->height || img1->width != img2->width) return 0;
+	
+	for(int i = 0; i < img1->height; ++i){
+		for(int j = 0; j < img1->width; ++j){
+			if(equal_RGB((img1->data)[i * img1->width + j], (img2->data)[i * img2->width + j]) == 0) return 0;
+		}
+	}
+	
+	return 1;
+}
+
 int image_is_correct(Image *img, char *in_file_name, char *out_file_name, operation_t operation, double parallel_time){
+	/**
+	*	Takes in an Image, a file path to a .bmp Image, a file path at which to save the edited Image,
+	*	an operation_t, and the time it took to edit the Image.
+	*	It edits the Image using a serial approach and checks if the input Image
+	*	and the serial edited Image are identical.
+	*	If they are, it prints the time it took to edit the Image using the serial approach.
+	*	If they are not, it saves the Image edited using the serial approach
+	*	under the name in out_file_name but with 'Serial_' appended to the front.
+	*/
+	
 	Image *serial_edited_image;
 	double start_serial, end_serial;
 	
@@ -498,8 +963,8 @@ int image_is_correct(Image *img, char *in_file_name, char *out_file_name, operat
 		fprintf(stdout, "Saving the serial edited image under the name Serial_%s...\n", file_name);
 		fflush(stdout);
 		
-		int exit_code = saveBMP(file_name, serial_edited_image);
-		if(exit_code == 0){ // error message was printed by the called function
+		int exit_code = save_BMP(file_name, serial_edited_image);
+		if(exit_code == -1){ // error message was printed by the called function
 			return -1;
 		}
 	}

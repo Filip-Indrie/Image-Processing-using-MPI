@@ -1,118 +1,108 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "mpi.h"
 #include "bmp.h"
 #include "bmp_common.h"
 
-MPI_Datatype create_mpi_datatype_for_RGB(){
-	RGB rgb;
-	MPI_Datatype mpi_rgb;
-	MPI_Datatype types[3] = {MPI_UNSIGNED_CHAR, MPI_UNSIGNED_CHAR, MPI_UNSIGNED_CHAR};
-	int block_lengths[3] = {1, 1, 1};
-	MPI_Aint displacements[3];
+Image *read_BMP_serial(const char *filename){
+	/**
+	*	Takes in a file path and returns the bitmap inside as an Image.
+	*/
 	
-	// getting field addresses
-	MPI_Get_address(&rgb.r, &displacements[0]);
-	MPI_Get_address(&rgb.g, &displacements[1]);
-	MPI_Get_address(&rgb.b, &displacements[2]);
-	
-	// making displacements relative to the first field
-	displacements[2] -= displacements[0];
-	displacements[1] -= displacements[0];
-	displacements[0] -= displacements[0];
-	
-	// creating struct
-	MPI_Type_create_struct(3, block_lengths, displacements, types, &mpi_rgb);
-	MPI_Type_commit(&mpi_rgb);
-	return mpi_rgb;
-}
-
-Image *readBMP_serial(const char *filename)
-{
-    FILE *f = fopen(filename, "rb");
-    if (!f)
-    {
-        fprintf(stderr, "Error: Could not open file %s\n", filename);
+    FILE *image_file = fopen(filename, "rb");
+    if (image_file == NULL){
+        fprintf(stderr, "Error in readBMP_serial: Could not open file %s\n", filename);
 		fflush(stderr);
         return NULL;
     }
 
     unsigned char header[54];
-    if (fread(header, sizeof(unsigned char), 54, f) != 54)
-    {
-        fprintf(stderr, "Error: Invalid BMP header\n");
+    if (fread(header, sizeof(unsigned char), 54, image_file) != 54){
+        fprintf(stderr, "Error in readBMP_serial: Invalid BMP header\n");
 		fflush(stderr);
-        fclose(f);
+        fclose(image_file);
         return NULL;
     }
 
-    if (header[0] != 'B' || header[1] != 'M')
-    {
-        fprintf(stderr, "Error: Not a valid BMP file\n");
+    if (header[0] != 'B' || header[1] != 'M'){
+        fprintf(stderr, "Error in readBMP_serial: Not a valid BMP file\n");
 		fflush(stderr);
-        fclose(f);
+        fclose(image_file);
         return NULL;
     }
 
     int width = *(int *)&header[18];
     int height = *(int *)&header[22];
-    int bitsPerPixel = *(short *)&header[28];
+    int bits_per_pixel = *(short *)&header[28];
 
 	int data_offset = *(int *)&header[10];
-	fseek(f, data_offset, SEEK_SET);
+	fseek(image_file, data_offset, SEEK_SET);
 
-    if (bitsPerPixel != 24)
-    {
-        fprintf(stderr, "Error: Only 24-bit BMPs are supported\n");
+    if (bits_per_pixel != 24){
+        fprintf(stderr, "Error in readBMP_serial: Only 24-bit BMPs are supported\n");
 		fflush(stderr);
-        fclose(f);
+        fclose(image_file);
         return NULL;
     }
 
     int row_padded = (width * 3 + 3) & (~3);
 	int pixel_data_size = width * 3;
 	int padding_size = row_padded - pixel_data_size;
-    unsigned char *row_pixels = (unsigned char *)malloc(pixel_data_size);
-    RGB *data = (RGB *)malloc(width * height * sizeof(RGB));
-    if (!data || !row_pixels)
-    {
-        fprintf(stderr, "Error: Memory allocation failed\n");
+	
+    unsigned char *row_pixels = (unsigned char*)malloc(pixel_data_size);
+	if(row_pixels == NULL){
+		fprintf(stderr, "Error in readBMP_serial while allocating memory\n");
 		fflush(stderr);
-        free(data);
-        free(row_pixels);
-        fclose(f);
+        fclose(image_file);
         return NULL;
-    }
+	}
+	
+    RGB *data = (RGB*)malloc(width * height * sizeof(RGB));
+    if(data == NULL){
+		fprintf(stderr, "Error in readBMP_serial while allocating memory\n");
+		fflush(stderr);
+        fclose(image_file);
+        return NULL;
+	}
 
-    for (int y = 0; y < height; y++)
-    {
-        fread(row_pixels, sizeof(unsigned char), pixel_data_size, f);
-        for (int x = 0; x < width; x++)
-        {
+    for (int y = 0; y < height; ++y){
+        fread(row_pixels, sizeof(unsigned char), pixel_data_size, image_file);
+        for (int x = 0; x < width; ++x){
             data[(height - 1 - y) * width + x].b = row_pixels[x * 3];
             data[(height - 1 - y) * width + x].g = row_pixels[x * 3 + 1];
             data[(height - 1 - y) * width + x].r = row_pixels[x * 3 + 2];
         }
-		if (padding_size > 0)
-		{
-			// fseek moves the file pointer (f) by padding_size bytes from the current position (SEEK_CUR)
-			fseek(f, padding_size, SEEK_CUR);
+		if (padding_size > 0){
+			fseek(image_file, padding_size, SEEK_CUR);
 		}
     }
 
     free(row_pixels);
-    fclose(f);
+    fclose(image_file);
 
     Image *img = (Image *)malloc(sizeof(Image));
+	if(img == NULL){
+		fprintf(stderr, "Error in readBMP_serial while allocating memory\n");
+		fflush(stderr);
+        fclose(image_file);
+        return NULL;
+	}
+	
     img->width = width;
     img->height = height;
     img->data = data;
     return img;
 }
 
-Image *readBMP_MPI(const char *file_name, int my_rank, int num_processes, int halo_dim, int *true_start, int *true_end){
-	int check, local_error_flag = 0, global_error_flag = 0;
+Image *read_BMP_MPI(const char *file_name, int my_rank, int num_processes, int halo_dim, int *true_start, int *true_end){
+	/**
+	*	Takes in a file path, this process's rank, the total number of processes and
+	*	the size of the halo (depending on the size of the kernel).
+	*	It returns the chunk of the bmp coresponding to each process and sets true_start and true_end
+	*	to mark the positions at which the chunk (not including the halos) starts and ends.
+	*/
+	
+	int check;
 	MPI_File image_file_handler;
 	
 	check = MPI_File_open(MPI_COMM_WORLD, file_name, MPI_MODE_RDONLY, MPI_INFO_NULL, &image_file_handler);
@@ -156,19 +146,18 @@ Image *readBMP_MPI(const char *file_name, int my_rank, int num_processes, int ha
 	int pixel_data_size = width * 3;
 	int padding_size = row_padded - pixel_data_size;
 	
-	unsigned char *row_pixels = (unsigned char *)malloc(pixel_data_size);
-	if(row_pixels == NULL) local_error_flag = 1;
-	
-	check = MPI_Reduce(&local_error_flag, &global_error_flag, 1, MPI_INT, MPI_LOR, 0, MPI_COMM_WORLD);
-	if(check != MPI_SUCCESS){
-		fprintf(stderr, "Rank %d: Error in readBMP_MPI while comunicating error flag\n", my_rank);
-		fflush(stderr);
-		return NULL;
-	}
-	
-	if(my_rank == 0 && global_error_flag == 1){
+	unsigned char *row_pixels = (unsigned char*)malloc(pixel_data_size);
+	if(row_pixels == NULL){
 		fprintf(stderr, "Rank %d: Error in readBMP_MPI while allocating memory\n", my_rank);
 		fflush(stderr);
+		
+		check = MPI_File_close(&image_file_handler);
+		if(check != MPI_SUCCESS){
+			fprintf(stderr, "Rank %d: Error in readBMP_MPI while closing file %s\n", my_rank, file_name);
+			fflush(stderr);
+			return NULL;
+		}
+		
 		return NULL;
 	}
 	
@@ -176,8 +165,10 @@ Image *readBMP_MPI(const char *file_name, int my_rank, int num_processes, int ha
 	int local_rows;
 	int true_rows = height / num_processes;
 	int remainder = height % num_processes;
+	
 	int rows_read_until_now = true_rows * virtual_rank + ((virtual_rank < remainder) ? virtual_rank : remainder);
 	MPI_Offset local_offset = data_offset + rows_read_until_now * (pixel_data_size + padding_size);
+	
 	if(virtual_rank != 0) local_offset -= halo_dim * (pixel_data_size + padding_size); // reading the halos as well
 	if(virtual_rank < remainder) ++true_rows; // distributing remainder uniformly
 	
@@ -192,28 +183,36 @@ Image *readBMP_MPI(const char *file_name, int my_rank, int num_processes, int ha
 	else *true_start = 0;
 	
 	RGB *data = (RGB *)malloc(width * local_rows * sizeof(RGB));
-	if(data == NULL) local_error_flag = 1;
-	
-	check = MPI_Reduce(&local_error_flag, &global_error_flag, 1, MPI_INT, MPI_LOR, 0, MPI_COMM_WORLD);
-	if(check != MPI_SUCCESS){
-		fprintf(stderr, "Rank %d: Error in readBMP_MPI while comunicating error flag\n", my_rank);
-		fflush(stderr);
-		return NULL;
-	}
-	
-	if(my_rank == 0 && global_error_flag == 1){
+	if(data == NULL){
 		fprintf(stderr, "Rank %d: Error in readBMP_MPI while allocating memory\n", my_rank);
 		fflush(stderr);
+		free(row_pixels);
+		
+		check = MPI_File_close(&image_file_handler);
+		if(check != MPI_SUCCESS){
+			fprintf(stderr, "Rank %d: Error in readBMP_MPI while closing file %s\n", my_rank, file_name);
+			fflush(stderr);
+			return NULL;
+		}
+		
 		return NULL;
 	}
 	
 	for (int y = 0; y < local_rows; y++){
 		check = MPI_File_read_at(image_file_handler, local_offset, row_pixels, pixel_data_size, MPI_UNSIGNED_CHAR, MPI_STATUS_IGNORE);
 		if(check != MPI_SUCCESS){
-			if(my_rank == 0){
-				fprintf(stderr, "Rank %d: Error in readBMP_MPI while reading from file file %s\n", my_rank, file_name);
+			fprintf(stderr, "Rank %d: Error in readBMP_MPI while reading from file file %s\n", my_rank, file_name);
+			fflush(stderr);
+			free(row_pixels);
+			free(data);
+		
+			check = MPI_File_close(&image_file_handler);
+			if(check != MPI_SUCCESS){
+				fprintf(stderr, "Rank %d: Error in readBMP_MPI while closing file %s\n", my_rank, file_name);
 				fflush(stderr);
+				return NULL;
 			}
+			
 			return NULL;
 		}
 		
@@ -235,18 +234,10 @@ Image *readBMP_MPI(const char *file_name, int my_rank, int num_processes, int ha
 	}
 	
 	Image *img = (Image*)malloc(sizeof(Image));
-	if(img == NULL) local_error_flag = 1;
-	
-	check = MPI_Reduce(&local_error_flag, &global_error_flag, 1, MPI_INT, MPI_LOR, 0, MPI_COMM_WORLD);
-	if(check != MPI_SUCCESS){
-		fprintf(stderr, "Rank %d: Error in readBMP_MPI while comunicating error flag\n", my_rank);
-		fflush(stderr);
-		return NULL;
-	}
-	
-	if(my_rank == 0 && global_error_flag == 1){
+	if(img == NULL){
 		fprintf(stderr, "Rank %d: Error in readBMP_MPI while allocating memory\n", my_rank);
 		fflush(stderr);
+		free(data);
 		return NULL;
 	}
 	
@@ -257,6 +248,12 @@ Image *readBMP_MPI(const char *file_name, int my_rank, int num_processes, int ha
 }
 
 Image *compose_BMP(Image *img, int my_rank, int num_processes){
+	/**
+	*	Takes in each process's Image and rank, as well as the total number of processes
+	*	and, for rank 0, returns the Image resulted from concatenating the Images of
+	*	each process, and, for ranks != 0, returns the process's original Image.
+	*/
+	
 	int check;
 	int width = img->width;
 	int total_height = 0;
@@ -287,6 +284,7 @@ Image *compose_BMP(Image *img, int my_rank, int num_processes){
 		if(new_img == NULL){
 			fprintf(stderr, "Rank %d: Error in compose_BMP while allocating memory\n", my_rank);
 			fflush(stderr);
+			free(heights);
 			return NULL;
 		}
 		
@@ -294,6 +292,8 @@ Image *compose_BMP(Image *img, int my_rank, int num_processes){
 		if(displacements == NULL){
 			fprintf(stderr, "Rank %d: Error in compose_BMP while allocating memory\n", my_rank);
 			fflush(stderr);
+			free(heights);
+			free(new_img);
 			return NULL;
 		}
 		
@@ -301,6 +301,9 @@ Image *compose_BMP(Image *img, int my_rank, int num_processes){
 		if(receives == NULL){
 			fprintf(stderr, "Rank %d: Error in compose_BMP while allocating memory\n", my_rank);
 			fflush(stderr);
+			free(heights);
+			free(new_img);
+			free(displacements);
 			return NULL;
 		}
 
@@ -312,6 +315,10 @@ Image *compose_BMP(Image *img, int my_rank, int num_processes){
 		if(data == NULL){
 			fprintf(stderr, "Rank %d: Error in compose_BMP while allocating memory\n", my_rank);
 			fflush(stderr);
+			free(heights);
+			free(new_img);
+			free(displacements);
+			free(receives);
 			return NULL;
 		}
 		
@@ -333,13 +340,32 @@ Image *compose_BMP(Image *img, int my_rank, int num_processes){
 	if(check != MPI_SUCCESS){
 		fprintf(stderr, "Rank %d: Error in compose_BMP while comunicating data\n", my_rank);
 		fflush(stderr);
+		
+		if(my_rank == 0){
+			free(heights);
+			free(new_img);
+			free(displacements);
+			free(receives);
+			free(data);
+		}
+		
+		check = deallocate_MPI_datatype(&mpi_rgb, my_rank);
+		if(check != 0){ // error message was printed by the called function
+			return NULL;
+		}
+		
 		return NULL;
 	}
 	
-	check = MPI_Type_free(&mpi_rgb);
-	if(check != MPI_SUCCESS){
-		fprintf(stderr, "Rank %d: Error in compose_BMP while de-allocating data type\n", my_rank);
-		fflush(stderr);
+	check = deallocate_MPI_datatype(&mpi_rgb, my_rank);
+	if(check != 0){ // error message was printed by the called function
+		if(my_rank == 0){
+			free(heights);
+			free(new_img);
+			free(displacements);
+			free(receives);
+			free(data);
+		}
 		return NULL;
 	}
 	
@@ -355,33 +381,38 @@ Image *compose_BMP(Image *img, int my_rank, int num_processes){
 }
 
 FILE *open_BMP(const char *filename, int *height, int *width, int *data_start, int *padding){
-	FILE *f = fopen(filename, "rb");
-    if (!f){
-        fprintf(stderr, "Error: Could not open file %s\n", filename);
+	/**
+	*	Takes in a file path and returns a FILE* associated with the opened file.
+	*	It also sets height, width, data_start and padding according to the file's header.
+	*/
+	
+	FILE *image_file = fopen(filename, "rb");
+    if (image_file == NULL){
+        fprintf(stderr, "Error in open_BMP: Could not open file %s\n", filename);
 		fflush(stderr);
         return NULL;
     }
 
     unsigned char header[54];
-    if (fread(header, sizeof(unsigned char), 54, f) != 54){
-        fprintf(stderr, "Error: Invalid BMP header\n");
+    if (fread(header, sizeof(unsigned char), 54, image_file) != 54){
+        fprintf(stderr, "Error in open_BMP: Invalid BMP header\n");
 		fflush(stderr);
-        fclose(f);
+        fclose(image_file);
         return NULL;
     }
 
     if (header[0] != 'B' || header[1] != 'M'){
-        fprintf(stderr, "Error: Not a valid BMP file\n");
+        fprintf(stderr, "Error in open_BMP: Not a valid BMP file\n");
 		fflush(stderr);
-        fclose(f);
+        fclose(image_file);
         return NULL;
     }
 	
 	int bitsPerPixel = *(short *)&header[28];
 	if (bitsPerPixel != 24){
-        fprintf(stderr, "Error: Only 24-bit BMPs are supported\n");
+        fprintf(stderr, "Error in open_BMP: Only 24-bit BMPs are supported\n");
 		fflush(stderr);
-        fclose(f);
+        fclose(image_file);
         return NULL;
     }
 	
@@ -394,17 +425,24 @@ FILE *open_BMP(const char *filename, int *height, int *width, int *data_start, i
 	
 	*padding = row_padded - pixel_data_size;
 	
-	return f;
+	return image_file;
 }
 
-Image *readBMP_chunk(FILE *image_file, int halo_dim, int chunk_size, int height, int width, int padding, int data_start, int *offset, int *true_start, int *true_end){
+Image *read_BMP_chunk(FILE *image_file, int halo_dim, int chunk_size, int height, int width, int padding, int data_start, int *offset, int *true_start, int *true_end){
+	/**
+	*	Takes in a FILE* coresponding to an open .bmp file, the size of the halo, the size of a chunk,
+	*	the height, width, data_start and padding of the image and the offset at which to start reading
+	*	and returns the read chunk as an Image, setting true_start and true_end to represent the start
+	* 	and end of the image chunk (not including the halos).
+	*/
+	
 	int pixel_data_size = width * 3;
 	int offset_stride = width * 3 + padding;
 	int next_row = (*offset - data_start) / offset_stride;
 	int halo_available = halo_dim;
 	int rows_to_read;
 	
-	if(next_row >= height){
+	if(next_row >= height){ // no more rows to read
 		Image *dummy_image = (Image*)malloc(sizeof(Image));
 		dummy_image->data = NULL;
 		return dummy_image;
@@ -452,14 +490,19 @@ Image *readBMP_chunk(FILE *image_file, int halo_dim, int chunk_size, int height,
 	if(row_pixels == NULL){
 		fprintf(stderr, "Rank 0: Error in readBMP_chunk while allocating memory\n");
 		fflush(stderr);
-		MPI_Abort(MPI_COMM_WORLD, -1);
+		fclose(image_file);
+		return NULL;
 	}
 	
 	RGB *data = (RGB*)malloc(rows_to_read * width * sizeof(RGB));
 	if(data == NULL){
 		fprintf(stderr, "Rank 0: Error in readBMP_chunk while allocating memory\n");
 		fflush(stderr);
-		MPI_Abort(MPI_COMM_WORLD, -1);
+		
+		free(row_pixels);
+		fclose(image_file);
+		
+		return NULL;
 	}
 	
 	fseek(image_file, *offset, SEEK_SET); // moving file cursor to the offset
@@ -491,106 +534,16 @@ Image *readBMP_chunk(FILE *image_file, int halo_dim, int chunk_size, int height,
 	return image_chunk;
 }
 
-int scatter_data(Image *img, RGB **data, int my_rank, int num_processes, int width, int *local_height, int halo_dim){
-	int check = 0;
-	int *heights = NULL;
-	int *displacements = NULL;
-	int *sends = NULL;
-	RGB *old_data = (img != NULL) ? img->data : NULL;
+int save_BMP(const char *filename, const Image *img){
+	/**
+	*	Takes in a file path and an Image, and save the Image at the given file path.
+	*/
 	
-	if(my_rank == 0){
-		int individual_height = img->height / num_processes;
-		int remainder = img->height % num_processes;
-		
-		heights = (int*)malloc(num_processes * sizeof(int));
-		if(heights == NULL){
-			fprintf(stderr, "Rank %d: Error in main while distributing height\n", my_rank);
-			fflush(stderr);
-			return -1;
-		}
-		
-		displacements = (int*)malloc(num_processes * sizeof(int));
-		if(displacements == NULL){
-			fprintf(stderr, "Rank %d: Error in main while distributing height\n", my_rank);
-			fflush(stderr);
-			return -1;
-		}
-		
-		for(int i = 0; i < num_processes; ++i){
-			heights[i] = individual_height + ((i < remainder) ? 1 : 0);
-			if(i == 0 || i == num_processes - 1) heights[i] += halo_dim;
-			else heights[i] += 2 * halo_dim;
-		}
-	}
-	
-	// sending local_height to every process
-	check = MPI_Scatter(
-		heights, 1, MPI_INT,
-		local_height, 1, MPI_INT,
-		0, MPI_COMM_WORLD
-	);
-	
-	if(check != MPI_SUCCESS){
-		fprintf(stderr, "Rank %d: Error in main while distributing height\n", my_rank);
+    FILE *image_file = fopen(filename, "wb");
+    if (image_file == NULL){
+        fprintf(stderr, "Error in save_BMP: Could not create file %s\n", filename);
 		fflush(stderr);
-		return -1;
-	}
-	
-	if(my_rank == 0){
-		sends = (int*)malloc(num_processes * sizeof(int));
-		if(sends == NULL){
-			fprintf(stderr, "Rank %d: Error in main while distributing height\n", my_rank);
-			fflush(stderr);
-			return -1;
-		}
-		
-		int offset = 0;
-		for(int i = 0; i < num_processes; ++i){
-			displacements[i] = offset;
-			offset += (heights[i] - 2 * halo_dim) * width;
-			sends[i] = heights[i] * width;
-		}
-	}
-	
-	// allocating data
-	*data = (RGB *)malloc(width * (*local_height) * sizeof(RGB));
-	if(data == NULL){
-		fprintf(stderr, "Rank %d: Error in main while allocating memory\n", my_rank);
-		fflush(stderr);
-		return -1;
-	}
-
-	MPI_Datatype mpi_rgb = create_mpi_datatype_for_RGB();
-	
-	check = MPI_Scatterv(
-		old_data, sends, displacements, mpi_rgb,
-		*data, (*local_height) * width, mpi_rgb,
-		0, MPI_COMM_WORLD
-	);
-	
-	if(check != MPI_SUCCESS){
-		fprintf(stderr, "Rank %d: Error in main while comunicating data\n", my_rank);
-		fflush(stderr);
-		return -1;
-	}
-	
-	check = MPI_Type_free(&mpi_rgb);
-	if(check != MPI_SUCCESS){
-		fprintf(stderr, "Rank %d: Error in compose_BMP while de-allocating data type\n", my_rank);
-		fflush(stderr);
-		return -1;
-	}
-	return 0;
-}
-
-int saveBMP(const char *filename, const Image *img)
-{
-    FILE *f = fopen(filename, "wb");
-    if (!f)
-    {
-        fprintf(stderr, "Error: Could not create file %s\n", filename);
-		fflush(stderr);
-        return 0;
+        return -1;
     }
 
     int width = img->width;
@@ -598,7 +551,7 @@ int saveBMP(const char *filename, const Image *img)
 	int pixel_data_size = width * 3;
     int row_padded = (width * 3 + 3) & (~3);
 	int padding_size = row_padded - pixel_data_size;
-    int fileSize = 54 + row_padded * height;
+    int file_size = 54 + row_padded * height;
 
     unsigned char header[54] = {
         'B', 'M',    // Signature
@@ -619,20 +572,19 @@ int saveBMP(const char *filename, const Image *img)
     };
 
     // Fill in width, height, and file size
-    *(int *)&header[2] = fileSize;
+    *(int *)&header[2] = file_size;
     *(int *)&header[18] = width;
     *(int *)&header[22] = height;
 
-    fwrite(header, sizeof(unsigned char), 54, f);
+    fwrite(header, sizeof(unsigned char), 54, image_file);
 
-    unsigned char *row_pixels = (unsigned char *)malloc(pixel_data_size);
 	unsigned char padding[3] = {0, 0, 0};
-    if (!row_pixels)
-    {
-        fprintf(stderr, "Error: Memory allocation failed\n");
+    unsigned char *row_pixels = (unsigned char *)malloc(pixel_data_size);
+    if (row_pixels == NULL){
+        fprintf(stderr, "Error in save_BMP while allocating memory\n");
 		fflush(stderr);
-        fclose(f);
-        return 0;
+        fclose(image_file);
+        return -1;
     }
 
     // Write pixel data bottom-to-top
@@ -645,14 +597,14 @@ int saveBMP(const char *filename, const Image *img)
             row_pixels[x * 3 + 1] = pixel.g;
             row_pixels[x * 3 + 2] = pixel.r;
         }
-        fwrite(row_pixels, sizeof(unsigned char), pixel_data_size, f);
+        fwrite(row_pixels, sizeof(unsigned char), pixel_data_size, image_file);
 		if(padding_size > 0)
 		{
-			fwrite(padding, sizeof(unsigned char), padding_size, f);
+			fwrite(padding, sizeof(unsigned char), padding_size, image_file);
 		}
     }
 
     free(row_pixels);
-    fclose(f);
-    return 1;
+    fclose(image_file);
+    return 0;
 }

@@ -10,6 +10,8 @@
 #define NUM_CORES 16
 #define NUM_WORKSTATIONS 5 
 
+#define OPTIMAL_CHUNK_SIZE 200
+
 int main(int argc, char **argv){
 	MPI_Init(&argc, &argv);
 	int my_rank, num_processes;
@@ -90,21 +92,25 @@ int main(int argc, char **argv){
 			double start_parallel, end_parallel;
 			
 			if(my_rank == 0) start_parallel = omp_get_wtime();
-			parallel_edited_image = image_processing_master(argv[2], argv[3], operation, chunk, my_rank, num_processes, NUM_CORES, NUM_WORKSTATIONS, 1);
+			parallel_edited_image = image_processing_master(argv[2], argv[3], operation, OPTIMAL_CHUNK_SIZE, my_rank, num_processes, NUM_CORES, NUM_WORKSTATIONS, 1);
 			if(my_rank == 0) end_parallel = omp_get_wtime();
-			
-			if(my_rank != 0){ // all of the worker processes called MPI_Finalize
-				return 0;
-			}
-			
 			if(parallel_edited_image == NULL){ // error message was printed by the called function
 				MPI_Abort(MPI_COMM_WORLD, -1);
+			}
+			
+			if(my_rank != 0){
+				free(parallel_edited_image);
+				MPI_Finalize();
+				return 0;
 			}
 			
 			int check = image_is_correct(parallel_edited_image, argv[2], argv[3], operation, end_parallel - start_parallel);
 			if(check != 0){
 				MPI_Abort(MPI_COMM_WORLD, -1);
 			}
+			
+			free(parallel_edited_image->data);
+			free(parallel_edited_image);
 		}
 	}
 	else{
@@ -120,6 +126,7 @@ int main(int argc, char **argv){
 			}
 			
 			if(my_rank != 0){
+				// processes already deallocated parallel_edited_image
 				MPI_Finalize();
 				return 0;
 			}
@@ -128,6 +135,9 @@ int main(int argc, char **argv){
 			if(check != 0){
 				MPI_Abort(MPI_COMM_WORLD, -1);
 			}
+			
+			free(parallel_edited_image->data);
+			free(parallel_edited_image);
 		}
 		else{
 			Image *parallel_edited_image;
@@ -149,6 +159,9 @@ int main(int argc, char **argv){
 			if(check != 0){
 				MPI_Abort(MPI_COMM_WORLD, -1);
 			}
+			
+			free(parallel_edited_image->data);
+			free(parallel_edited_image);
 		}
 	}
 	

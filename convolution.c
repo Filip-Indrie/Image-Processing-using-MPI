@@ -6,6 +6,11 @@
 #include "bmp_common.h"
 
 operation_t string_to_operation(char *string){
+	/**
+	*	Takes in a string representing an operation and
+	*	returns its coresponding operation_t.
+	*/
+	
 	if(stricmp(string, "RIDGE") == 0) return RIDGE;
 	else if (stricmp(string, "EDGE") == 0) return EDGE;
 	else if (stricmp(string, "SHARPEN") == 0) return SHARPEN;
@@ -17,6 +22,11 @@ operation_t string_to_operation(char *string){
 }
 
 int get_kernel_size(const operation_t operation){
+	/**
+	*	Takes in an operation_t and
+	*	returns its coresponding kernel size.
+	*/
+	
 	switch(operation){
 		case RIDGE:{
 			return 3;
@@ -48,16 +58,25 @@ int get_kernel_size(const operation_t operation){
 }
 
 double* generate_kernel(const operation_t operation, int *size){
+	/**
+	*	Takes in an operation_t and returns its coresponding kernel.
+	*	It also sets size to match the kernels size.
+	*/
+	
 	*size = get_kernel_size(operation);
+	if(*size == -1){ // error message was printed by the called function
+		return NULL;
+	}
+	
+	double *kernel = (double*)malloc(*size * *size * sizeof(double));
+	if(kernel == NULL){
+		fprintf(stderr, "Error in generate_kernel while allocating memory\n");
+		fflush(stderr);
+		return NULL;
+	}
+			
 	switch(operation){
 		case RIDGE:{
-			double *kernel = (double*)malloc(3 * 3 * sizeof(double));
-			if(kernel == NULL){
-				fprintf(stderr, "Error in generate_kernel while allocating memory\n");
-				fflush(stderr);
-				return NULL;
-			}
-			
 			kernel[0] = 0;
 			kernel[1] = -1;
 			kernel[2] = 0;
@@ -70,13 +89,6 @@ double* generate_kernel(const operation_t operation, int *size){
 			return kernel;
 		}
 		case EDGE:{
-			double *kernel = (double*)malloc(3 * 3 * sizeof(double));
-			if(kernel == NULL){
-				fprintf(stderr, "Error in generate_kernel while allocating memory\n");
-				fflush(stderr);
-				return NULL;
-			}
-			
 			kernel[0] = -1;
 			kernel[1] = -1;
 			kernel[2] = -1;
@@ -89,13 +101,6 @@ double* generate_kernel(const operation_t operation, int *size){
 			return kernel;
 		}
 		case SHARPEN:{
-			double *kernel = (double*)malloc(3 * 3 * sizeof(double));
-			if(kernel == NULL){
-				fprintf(stderr, "Error in generate_kernel while allocating memory\n");
-				fflush(stderr);
-				return NULL;
-			}
-			
 			kernel[0] = 0;
 			kernel[1] = -1;
 			kernel[2] = 0;
@@ -108,13 +113,6 @@ double* generate_kernel(const operation_t operation, int *size){
 			return kernel;
 		}
 		case BOXBLUR:{
-			double *kernel = (double*)malloc(3 * 3 * sizeof(double));
-			if(kernel == NULL){
-				fprintf(stderr, "Error in generate_kernel while allocating memory\n");
-				fflush(stderr);
-				return NULL;
-			}
-			
 			kernel[0] = (double)1/9;
 			kernel[1] = (double)1/9;
 			kernel[2] = (double)1/9;
@@ -127,13 +125,6 @@ double* generate_kernel(const operation_t operation, int *size){
 			return kernel;
 		}
 		case GAUSSBLUR3:{
-			double *kernel = (double*)malloc(3 * 3 * sizeof(double));
-			if(kernel == NULL){
-				fprintf(stderr, "Error in generate_kernel while allocating memory\n");
-				fflush(stderr);
-				return NULL;
-			}
-			
 			kernel[0] = (double)1/16;
 			kernel[1] = (double)2/16;
 			kernel[2] = (double)1/16;
@@ -146,13 +137,6 @@ double* generate_kernel(const operation_t operation, int *size){
 			return kernel;
 		}
 		case GAUSSBLUR5:{
-			double *kernel = (double*)malloc(5 * 5 * sizeof(double));
-			if(kernel == NULL){
-				fprintf(stderr, "Error in generate_kernel while allocating memory\n");
-				fflush(stderr);
-				return NULL;
-			}
-			
 			kernel[0] = (double)1/256;
 			kernel[1] = (double)4/256;
 			kernel[2] = (double)6/256;
@@ -181,13 +165,6 @@ double* generate_kernel(const operation_t operation, int *size){
 			return kernel;
 		}
 		case UNSHARP5:{
-			double *kernel = (double*)malloc(5 * 5 * sizeof(double));
-			if(kernel == NULL){
-				fprintf(stderr, "Error in generate_kernel while allocating memory\n");
-				fflush(stderr);
-				return NULL;
-			}
-			
 			kernel[0] = (double)-1/256;
 			kernel[1] = (double)-4/256;
 			kernel[2] = (double)-6/256;
@@ -224,6 +201,13 @@ double* generate_kernel(const operation_t operation, int *size){
 }
 
 Image* perform_convolution_serial(const Image *img, const operation_t operation){
+	/**
+	*	Takes in an Image and an operation_t and applies the
+	* 	coresponding convolution on the Image. It 'pads' the image
+	*	in a way so that it doesn't resize the Image.
+	*	It returns the edited Image.
+	*/
+	
 	Image *new_img = (Image*)malloc(sizeof(Image));
 	if(new_img == NULL){
 		fprintf(stderr, "Error in perform_convolution_serial while allocating memory\n");
@@ -287,6 +271,20 @@ Image* perform_convolution_serial(const Image *img, const operation_t operation)
 }
 
 Image* perform_convolution_parallel(const Image *img, const operation_t operation, const int true_start, const int true_end, const int threads){
+	/**
+	*	Takes in an Image and an operation_t and applies the
+	* 	coresponding convolution on the Image. It 'pads' the image
+	*	in a way so that it doesn't resize the Image.
+	*	It returns the edited Image.
+	*
+	*	The input image may contain halo rows above and below the
+	* 	image. true_start and true_end mark the actual start and end
+	*	of the Image.
+	*
+	*	The thread parameter specifices how many threads to create to
+	*	perform the convolution.
+	*/
+	
 	Image *new_img = (Image*)malloc(sizeof(Image));
 	if(new_img == NULL){
 		fprintf(stderr, "Error in perform_convolution_parallel while allocating memory\n");
