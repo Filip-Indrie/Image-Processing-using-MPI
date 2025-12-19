@@ -11,11 +11,10 @@
 #define WORK_DATA_RECEIVE_TAG 4
 #define TERMINATE_TAG 5
 
-Image *image_processing_serial(const char *in_file_name, const char *out_file_name, operation_t operation, int save){
+Image *image_processing_serial(const char *in_file_name, operation_t operation){
 	/**
-	*	Takes in a file path to the file to edit, a file path to the location where to save the edited image,
-	*	an operation_t, and whether to save edited Image or not.
-	*	It reads the .bmp file, edits the Image, saves the edited Image (if specified) and returns the edited Image.
+	*	Takes in a file path to the file to edit and an operation_t.
+	*	It reads the .bmp file, edits the Image and returns the edited Image.
 	*/
 	
 	Image *img = read_BMP_serial(in_file_name);
@@ -30,24 +29,17 @@ Image *image_processing_serial(const char *in_file_name, const char *out_file_na
 	if(edited_img == NULL){ // error message was printed by the called function
 		return NULL;
 	}
-	
-	if(save == 1){
-		int exit_code = save_BMP(out_file_name, edited_img);
-		if(exit_code == -1){ // error message was printed by the called function
-			return NULL;
-		}
-	}
+
 	return edited_img;
 }
 
-Image *image_processing_parallel_sft(const char *in_file_name, const char *out_file_name, operation_t operation, int my_rank, int num_processes, int num_cores, int save){
+Image *image_processing_parallel_sft(const char *in_file_name, operation_t operation, int my_rank, int num_processes, int num_cores){
 	/**
-	*	Takes in a file path to the file to edit, a file path to the location where to save the edited image,
-	*	an operation_t, this process's rank, the total number of processes, the number of cores on this workstation
-	*	and whether to save edited Image or not.
+	*	Takes in a file path to the file to edit, an operation_t, 
+	*	this process's rank, the total number of processes and the number of cores on this workstation.
 	*	It reads the process's associated chunk of the .bmp file, edits the Image chunk
 	*	and, if rank != 0, sends the edited Image chunk to process 0 and returns the edited Image chunk,
-	*	and if rank == 0, saves the whole edited Image (if specified) and returns the whole edited Image.
+	*	and if rank == 0, returns the whole edited Image.
 	*/
 	
 	int kernel_size = get_kernel_size(operation);
@@ -75,15 +67,6 @@ Image *image_processing_parallel_sft(const char *in_file_name, const char *out_f
 	
 	free(edited_img->data);
 	free(edited_img);
-	
-	if(save == 1 && my_rank == 0){
-		int exit_code = save_BMP(out_file_name, composed_img);
-		if(exit_code == -1){ // error message was printed by the called function
-			free(composed_img->data);
-			free(composed_img);
-			return NULL;
-		}
-	}
 	
 	return composed_img;
 }
@@ -188,13 +171,13 @@ int scatter_data(Image *img, RGB **data, int my_rank, int num_processes, int wid
 	return 0;
 }
 
-Image *image_processing_parallel_no_sft(const char *in_file_name, const char *out_file_name, operation_t operation, int my_rank, int num_processes, int num_cores, int num_workstations, int save){
+Image *image_processing_parallel_no_sft(const char *in_file_name, operation_t operation, int my_rank, int num_processes, int num_cores, int num_workstations){
 	/**
-	*	Takes in a file path to the file to edit, a file path to the location where to save the edited image,
-	*	an operation_t, this process's rank, the total number of processes, the number of cores on this workstation,
-	*	the total number of workstations and whether to save edited Image or not.
+	*	Takes in a file path to the file to edit, an operation_t, this process's rank,
+	*	the total number of processes, the number of cores on this workstation
+	*	and the total number of workstations.
 	*	If rank == 0, the process reads the whole .bmp file, distributes chunks of the Image to each process (including process 0),
-	*	edits its respective chunk, composes the whole edited Image, saves it (if specified) and returns the whole edited Image.
+	*	edits its respective chunk, composes the whole edited Image and returns it.
 	*	If rank != 0, the process receives its respective chunk, edits it, sends the edited chunk to process 0
 	*	and returns the edited Image chunk.
 	*/
@@ -267,13 +250,6 @@ Image *image_processing_parallel_no_sft(const char *in_file_name, const char *ou
 	
 	free(edited_img->data);
 	free(edited_img);
-	
-	if(save == 1 && my_rank == 0){
-		int exit_code = save_BMP(out_file_name, composed_img);
-		if(exit_code == -1){ // error message was printed by the called function
-			return NULL;
-		}
-	}
 	
 	return composed_img;
 }
@@ -364,11 +340,10 @@ int send_work(int worker_process, operation_t operation, int *work_done, FILE *i
 	return 0;
 }
 
-Image *master_process(const char *in_file_name, const char *out_file_name, operation_t operation, int chunk, int num_processes, int num_threads, int save){
+Image *master_process(const char *in_file_name, operation_t operation, int chunk, int num_processes, int num_threads){
 	/**
-	*	Takes in a file path to the file to edit, a file path to the location where to save the edited image,
-	*	an operation_t, the size of a chunk, the total number of processes, the number of threads on available to each process,
-	*	and whether to save edited Image or not.
+	*	Takes in a file path to the file to edit, an operation_t, the size of a chunk,
+	*	the total number of processes and the number of threads on available to each process.
 	*	It opens the .bmp file and reads and sends a chunk to each worker process. After that, to each worker process
 	*	that finishes its work, it collects the edited chunk and sends another chunk to the worker process
 	*	until there are no more chunks to process. At that point, it waits for all the worker processes to finish their work,
@@ -865,14 +840,12 @@ int worker_process(int my_rank){
 	return 0;
 }
 
-Image *image_processing_master(const char *in_file_name, const char *out_file_name, operation_t operation, int chunk_size, int my_rank, int num_processes, int num_cores, int num_workstations, int save){
+Image *image_processing_master(const char *in_file_name, operation_t operation, int chunk_size, int my_rank, int num_processes, int num_cores, int num_workstations){
 	/**
-	*	Takes in a file path to the file to edit, a file path to the location where to save the edited image,
-	*	an operation_t, the size of a chunk, this process's rank, the total number of processes,
-	*	the number of available cores on this workstation, the number of workstations
-	*	and whether to save edited Image or not.
-	*	If rank == 0, it calls master_process with the appropriate arguments,
-	*	saves the whole edited image (if specified) and returns the whole edited Image.
+	*	Takes in a file path to the file to edit, an operation_t, the size of a chunk,
+	*	this process's rank, the total number of processes,
+	*	the number of available cores on this workstation and the number of workstations.
+	*	If rank == 0, it calls master_process with the appropriate arguments and returns the whole edited Image.
 	*	If rank != 0, it calls worker_process with the appropriate arguments and returns a `dummy` Image.
 	*/
 	
@@ -880,16 +853,9 @@ Image *image_processing_master(const char *in_file_name, const char *out_file_na
 		Image *img = NULL;
 		int num_threads = max(1, num_cores / (num_processes / num_workstations));
 
-		img = master_process(in_file_name, out_file_name, operation, chunk_size, num_processes, num_threads, save);
+		img = master_process(in_file_name, operation, chunk_size, num_processes, num_threads);
 		if(img == NULL){ // error message was printed by the called function
 			return NULL;
-		}
-		
-		if(save == 1){
-			int exit_code = save_BMP(out_file_name, img);
-			if(exit_code == -1){ // error message was printed by the called function
-				return NULL;
-			}
 		}
 		
 		return img;
@@ -926,55 +892,4 @@ int images_are_identical(Image *img1, Image *img2){
 	}
 	
 	return 1;
-}
-
-int image_is_correct(Image *img, char *in_file_name, char *out_file_name, operation_t operation, double parallel_time){
-	/**
-	*	Takes in an Image, a file path to a .bmp Image, a file path at which to save the edited Image,
-	*	an operation_t, and the time it took to edit the Image.
-	*	It edits the Image using a serial approach and checks if the input Image
-	*	and the serial edited Image are identical.
-	*	If they are, it prints the time it took to edit the Image using the serial approach.
-	*	If they are not, it saves the Image edited using the serial approach
-	*	under the name in out_file_name but with 'Serial_' appended to the front.
-	*/
-	
-	Image *serial_edited_image;
-	double start_serial, end_serial;
-	
-	start_serial = omp_get_wtime();
-	serial_edited_image = image_processing_serial(in_file_name, out_file_name, operation, 0);
-	end_serial = omp_get_wtime();
-	if(serial_edited_image == NULL){ // error message was printed by the called function
-		return -1;
-	}
-	
-	if(images_are_identical(serial_edited_image, img) == 0){
-		fprintf(stdout, "The parallel edited image and the serial edited image are NOT identical!\n");
-		fflush(stdout);
-		
-		char file_name[256] = "";
-		char *aux = strrchr(out_file_name, '\\');
-		int index = aux - out_file_name;
-		strncat(file_name, out_file_name, index + 1);
-		file_name[index + 1] = '\0';
-		strcat(file_name, "Serial_");
-		strcat(file_name, aux + 1);
-		fprintf(stdout, "Saving the serial edited image under the name Serial_%s...\n", file_name);
-		fflush(stdout);
-		
-		int exit_code = save_BMP(file_name, serial_edited_image);
-		if(exit_code == -1){ // error message was printed by the called function
-			return -1;
-		}
-	}
-	else{
-		fprintf(stdout, "The parallel edited image and the serial edited image are identical.\n");
-		fprintf(stdout, "Serial Time: %f\n", end_serial - start_serial);
-		fprintf(stdout, "Parallel Time: %f\n", parallel_time);
-		fprintf(stdout, "Speedup: %f\n\n", (end_serial - start_serial) / parallel_time);
-		fflush(stdout);
-	}
-	
-	return 0;
 }
