@@ -24,8 +24,7 @@ int main(int argc, char **argv){
 			fprintf(stdout, "Usage: %s [version = {`serial`, `parallel`, `master`}] [file_in] [file_out] [operation = {`RIDGE`, `EDGE`, `SHARPEN`, `BOXBLUR`, `GAUSSBLUR3`, `GAUSSBLUR5`, `UNSHARP5`}] [shared_file_tree = {`0` = False, `1` = True}]", argv[0]);
 			fflush(stdout);
 		}
-		MPI_Finalize();
-		return 0;
+		MPI_Abort(MPI_COMM_WORLD, -1);
 	}
 	
 	if(((stricmp(argv[1], "serial") != 0 && stricmp(argv[1], "master") != 0) && argc == 5) || (stricmp(argv[1], "parallel") != 0 && argc == 6)){
@@ -33,8 +32,7 @@ int main(int argc, char **argv){
 			fprintf(stdout, "Invalid version\n");
 			fflush(stdout);
 		}
-		MPI_Finalize();
-		return 0;
+		MPI_Abort(MPI_COMM_WORLD, -1);
 	}
 	
 	operation = string_to_operation(argv[4]);
@@ -43,8 +41,7 @@ int main(int argc, char **argv){
 			fprintf(stdout, "Invalid operation\n");
 			fflush(stdout);
 		}
-		MPI_Finalize();
-		return 0;
+		MPI_Abort(MPI_COMM_WORLD, -1);
 	}
 	
 	int shared_file_tree;
@@ -57,8 +54,7 @@ int main(int argc, char **argv){
 			fprintf(stdout, "Invalid shared_file_tree argument\n");
 			fflush(stdout);
 		}
-		MPI_Finalize();
-		return 0;
+		MPI_Abort(MPI_COMM_WORLD, -1);
 	}
 	
 	/**
@@ -143,7 +139,7 @@ int main(int argc, char **argv){
 				file_name[index + 1] = '\0';
 				strcat(file_name, "Serial_");
 				strcat(file_name, aux + 1);
-				fprintf(stdout, "Saving the serial edited image under at %s...\n", file_name);
+				fprintf(stdout, "Saving the serial edited image at %s...\n", file_name);
 				fflush(stdout);
 
 				int exit_code = save_BMP(file_name, serial_edited_image);
@@ -210,7 +206,7 @@ int main(int argc, char **argv){
 				file_name[index + 1] = '\0';
 				strcat(file_name, "Serial_");
 				strcat(file_name, aux + 1);
-				fprintf(stdout, "Saving the serial edited image under at %s...\n", file_name);
+				fprintf(stdout, "Saving the serial edited image at %s...\n", file_name);
 				fflush(stdout);
 
 				int exit_code = save_BMP(file_name, serial_edited_image);
@@ -240,6 +236,7 @@ int main(int argc, char **argv){
 			}
 			
 			if(my_rank != 0){
+				// processes already deallocated parallel_edited_image
 				MPI_Finalize();
 				return 0;
 			}
@@ -274,7 +271,7 @@ int main(int argc, char **argv){
 				file_name[index + 1] = '\0';
 				strcat(file_name, "Serial_");
 				strcat(file_name, aux + 1);
-				fprintf(stdout, "Saving the serial edited image under at %s...\n", file_name);
+				fprintf(stdout, "Saving the serial edited image at %s...\n", file_name);
 				fflush(stdout);
 
 				int exit_code = save_BMP(file_name, serial_edited_image);
