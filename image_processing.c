@@ -11,6 +11,10 @@
 #define WORK_DATA_RECEIVE_TAG 4
 #define TERMINATE_TAG 5
 
+/**
+*	IMAGE PROCESSING SERIAL
+*/
+
 Image *image_processing_serial(const char *in_file_name, operation_t operation){
 	/**
 	*	Takes in a file path to the file to edit and an operation_t.
@@ -32,6 +36,12 @@ Image *image_processing_serial(const char *in_file_name, operation_t operation){
 
 	return edited_img;
 }
+
+
+
+/**
+*	IMAGE PROCESSING PARALLEL SFT
+*/
 
 Image *image_processing_parallel_sft(const char *in_file_name, operation_t operation, int my_rank, int num_processes, int num_cores){
 	/**
@@ -70,6 +80,12 @@ Image *image_processing_parallel_sft(const char *in_file_name, operation_t opera
 	
 	return composed_img;
 }
+
+
+
+/**
+*	IMAGE PROCESSING NO PARALLEL SFT
+*/
 
 int scatter_data(Image *img, RGB **data, int my_rank, int num_processes, int width, int *local_height, int halo_dim){
 	/**
@@ -253,6 +269,12 @@ Image *image_processing_parallel_no_sft(const char *in_file_name, operation_t op
 	
 	return composed_img;
 }
+
+
+
+/**
+*	IMAGE PROCESSING MASTER/WORKER
+*/
 
 int send_work(int worker_process, operation_t operation, int *work_done, FILE *image_file, int halo_dim, int chunk_size, int height, int width, int padding, int data_start, int *offset, int num_threads){
 	/**
@@ -877,6 +899,12 @@ Image *image_processing_master(const char *in_file_name, operation_t operation, 
 		return dummy;
 	}
 }
+
+
+
+/**
+*	HELPER FUNCTION
+*/
 
 int images_are_identical(Image *img1, Image *img2){
 	/**

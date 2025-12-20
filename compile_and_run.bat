@@ -15,7 +15,7 @@ for /l %%x in (2, 1, 16) do (
 )
 
 
-GOTO :EOF
+GOTO :SHUTDOWN
 
 :: feature_testing serial Large.bmp
 mpiexec -n 5 feature_testing serial Photos\Large.bmp Photos\Serial_Large.bmp gaussblur5
@@ -53,4 +53,6 @@ mpiexec -n 5 feature_testing parallel Photos\XXL.bmp Photos\Parallel_no_sft_XXL.
 :: feature_testing master XXL.bmp
 mpiexec -n 5 feature_testing master Photos\XXL.bmp Photos\Master_XXL.bmp gaussblur5
 
-:EOF
+:SHUTDOWN 
+
+shutdown /s

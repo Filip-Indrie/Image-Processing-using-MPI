@@ -10,8 +10,8 @@
 #define NUM_CORES 16
 #define NUM_WORKSTATIONS 1 
 
-#define CHUNK_START 20
-#define CHUNK_STEP 10
+#define CHUNK_START 5
+#define CHUNK_STEP 5
 #define CHUNK_END 1000
 
 #define OPERATION GAUSSBLUR5
