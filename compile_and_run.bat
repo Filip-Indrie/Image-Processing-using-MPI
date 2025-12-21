@@ -9,10 +9,14 @@ gcc -g feature_testing.c -I "c:\Program Files (x86)\Microsoft SDKs\MPI\Include" 
 gcc -g experiments.c -I "c:\Program Files (x86)\Microsoft SDKs\MPI\Include" -L "c:\Program Files (x86)\Microsoft SDKs\MPI\Lib\x64" -o experiments.exe bmp_common.o bmp.o convolution.o image_processing.o -lmsmpi -fopenmp
 
 
+
+GOTO :SHUTDOWN
+
 :: running experiments for 2 - 16 processes
 for /l %%x in (2, 1, 16) do (
 	mpiexec -n %%x experiments Measurements\measurements_%%x.txt
 )
+
 
 
 GOTO :SHUTDOWN
