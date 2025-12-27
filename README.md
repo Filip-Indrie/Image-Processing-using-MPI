@@ -19,7 +19,7 @@ The following operations are all implemented based on convolution:
 ## Program Interface
 
 > [!IMPORTANT]
-> ### To compile and run any of these programs, you need to install MSMPI TOOLS and MSMPI SDK. These can be found [here](https://learn.microsoft.com/en-us/message-passing-interface/microsoft-mpi).
+> ### To compile and run any of these programs, you need to install gcc, MSMPI TOOLS and MSMPI SDK. MSMPI TOOLS and MSMPI SDK can be found [here](https://learn.microsoft.com/en-us/message-passing-interface/microsoft-mpi).
 
 The provided `compile_and_run.bat` compiles all the necessary files into 2 executables: `feature_testing.exe` and `experiments.exe`.
 
