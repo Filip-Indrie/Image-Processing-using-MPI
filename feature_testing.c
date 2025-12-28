@@ -88,9 +88,6 @@ int main(int argc, char **argv){
 			free(edited_img);
 		}
 		else{ // master/worker
-			fprintf(stdout, "Master/Worker\n");
-			fflush(stdout);
-			
 			int chunk = 100;
 			Image *parallel_edited_image, *serial_edited_image;
 			double parallel_time, serial_time;
@@ -156,9 +153,6 @@ int main(int argc, char **argv){
 	}
 	else{
 		if(shared_file_tree == 1){
-			fprintf(stdout, "Parallel SFT\n");
-			fflush(stdout);
-			
 			Image *parallel_edited_image, *serial_edited_image;
 			double parallel_time, serial_time;
 			int check;
@@ -221,9 +215,6 @@ int main(int argc, char **argv){
 			free(serial_edited_image);
 		}
 		else{
-			fprintf(stdout, "Parallel NO SFT\n");
-			fflush(stdout);
-			
 			Image *parallel_edited_image, *serial_edited_image;
 			double serial_time, parallel_time;
 			int check;

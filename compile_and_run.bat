@@ -59,4 +59,4 @@ mpiexec -n 5 feature_testing master Photos\XXL.bmp Photos\Master_XXL.bmp gaussbl
 
 :SHUTDOWN 
 
-shutdown /s
+:: shutdown /s
